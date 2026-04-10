@@ -178,3 +178,6 @@ users_less_than_18.json
 
 !.gitkeep
 *.zip
+
+
+*.lock
