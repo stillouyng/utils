@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+defaults:
+  run:
+    working-directory: twenty-two-port-connection
+
+jobs:
+  build:
+    name: Build ${{ matrix.artifact }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: twc-linux-x86_64
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: twc-windows-x86_64.exe
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: twc-macos-x86_64
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: twc-macos-aarch64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          BIN=target/${{ matrix.target }}/release/twenty-two-port-connection
+          [[ "${{ matrix.os }}" == "windows-latest" ]] && BIN="${BIN}.exe"
+          cp "$BIN" ../${{ matrix.artifact }}
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
