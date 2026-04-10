@@ -11,6 +11,8 @@ defaults:
 
 jobs:
   build:
+    permissions:
+      contents: write
     name: Build ${{ matrix.artifact }}
     strategy:
       matrix:
