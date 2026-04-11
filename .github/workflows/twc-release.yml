@@ -1,9 +1,9 @@
-name: Release
+name: TWC Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'twc-v*'
 
 defaults:
   run:
