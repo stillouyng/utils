@@ -45,22 +45,22 @@ Download `twc-windows-x86_64.exe` from the [latest release](https://github.com/s
 
 ```bash
 # Add a profile (passwordless / key-based)
-twc add_config <name> <user> <host>
-twc add_config <name> <user> <host> --port 2222
-twc add_config <name> <user> <host> --key ~/.ssh/id_ed25519
+twc add <name> <user> <host>
+twc add <name> <user> <host> --port 2222
+twc add <name> <user> <host> --key ~/.ssh/id_ed25519
 
 # Add a profile with an encrypted SSH password
-twc add_config <name> <user> <host> --password
+twc add <name> <user> <host> --password
 # → prompts for SSH password, then master key (used to encrypt it)
 
 # Connect
 twc <name>
 
 # List all profiles
-twc all_configs
+twc list
 
 # Remove a profile
-twc remove_config <name>
+twc remove <name>
 ```
 
 ## Password encryption
@@ -73,7 +73,7 @@ Add your key to the SSH agent once and `twc` will pick it up automatically:
 
 ```bash
 ssh-add ~/.ssh/id_ed25519
-twc add_config prod user host --key ~/.ssh/id_ed25519
+twc add prod user host --key ~/.ssh/id_ed25519
 twc prod  # no passphrase prompt
 ```
 
@@ -86,4 +86,3 @@ git clone https://github.com/stillouyng/twenty-two-port-connection
 cd twenty-two-port-connection
 cargo build --release
 ```
-a

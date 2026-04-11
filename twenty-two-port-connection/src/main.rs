@@ -16,7 +16,7 @@ fn main() {
         }
         (
             _,
-            Some(Command::AddConfig {
+            Some(Command::Add {
                 name,
                 user,
                 host,
@@ -34,14 +34,14 @@ fn main() {
                 *password,
             );
         }
-        (_, Some(Command::RemoveConfig { name })) => {
+        (_, Some(Command::Remove { name })) => {
             remove_config(name);
         }
-        (_, Some(Command::AllConfigs {})) => {
+        (_, Some(Command::List {})) => {
             list_configs();
         }
         _ => {
-            println!("Use 'twc <name>' or 'twc add_config <name> ...'")
+            println!("Use 'twc <name>' or 'twc add <name> ...'")
         }
     }
 }

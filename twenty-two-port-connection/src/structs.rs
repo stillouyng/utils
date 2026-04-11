@@ -4,18 +4,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Subcommand)]
 pub enum Command {
     #[clap(
-        name = "add_config",
+        name = "add",
         about = "Add a new SSH config profile",
         long_about = "Add a new SSH config profile.
 
         Examples:
-          twc add_config myserver alice 192.168.1.1
-          twc add_config myserver alice 192.168.1.1 --port 2222
-          twc add_config myserver alice 192.168.1.1 --key ~/.ssh/id_rsa
-          twc add_config myserver alice 192.168.1.1 --password   (prompts for SSH password + master key)
+          twc add myserver alice 192.168.1.1
+          twc add myserver alice 192.168.1.1 --port 2222
+          twc add myserver alice 192.168.1.1 --key ~/.ssh/id_rsa
+          twc add myserver alice 192.168.1.1 --password   (prompts for SSH password + master key)
         "
     )]
-    AddConfig {
+    Add {
         name: String,
         user: String,
         host: String,
@@ -30,21 +30,21 @@ pub enum Command {
         password: bool,
     },
     #[clap(
-        name = "remove_config",
+        name = "remove",
         about = "Remove an existing SSH config profile",
         long_about = "Remove an existing SSH config profile by name.
 
         Example:
-          twc remove_config myserver
+          twc remove myserver
         "
     )]
-    RemoveConfig { name: String },
+    Remove { name: String },
     #[clap(
-        name = "all_configs",
+        name = "list",
         about = "List all config profiles",
-        long_about = "List all config profiles in format: {name} | {user}@{host}:{port}"
+        long_about = "List all config profiles in format: {name} | {user}@{host}:{port} [password | key]"
     )]
-    AllConfigs {},
+    List {},
 }
 
 #[derive(Debug, Parser)]
@@ -57,17 +57,14 @@ pub enum Command {
     Passwords are encrypted with AES-256-GCM and protected by a master key.
     Usage:
       twc <name>                                       Connect using a saved profile
-      twc add_config <name> <user> <host> [options]    Save a new SSH profile
-      twc remove_config <name>                         Delete a saved profile\n\nOptions for add_config:
-        --port <PORT>                   SSH port (default: 22)
-        --key <PATH>                    Path to private key file
-        --password                      Prompt for SSH password (encrypted with master key)
+      twc add <name> <user> <host> [options]    Save a new SSH profile
+      twc remove <name>                         Delete a saved profile
 
     Examples:
-      twc add_config prod deploy 10.0.0.1 --password
-      twc add_config staging alice staging.example.com --port 2222 --key ~/.ssh/id_ed25519
+      twc add prod deploy 10.0.0.1 --password
+      twc add staging alice staging.example.com --port 2222 --key ~/.ssh/id_ed25519
       twc prod
-      twc remove_config prod
+      twc remove prod
     "
 )]
 pub struct Cli {
@@ -85,7 +82,7 @@ pub struct SSHConfig {
     pub port: Option<u16>,
 
     #[serde(default)]
-    pub identify_file: Option<String>,
+    pub identity_file: Option<String>,
 
     #[serde(default)]
     pub password: Option<EncryptedSecret>,

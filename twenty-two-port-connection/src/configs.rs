@@ -85,7 +85,7 @@ pub fn run_config(name: &str) {
                 cmd.arg("-p").arg(format!("{port}"));
             }
 
-            if let Some(ref key) = cfg.identify_file {
+            if let Some(ref key) = cfg.identity_file {
                 cmd.arg("-i").arg(key);
             }
 
@@ -100,6 +100,10 @@ pub fn run_config(name: &str) {
             exit(status.code().unwrap_or(1));
         }
     }
+    else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        exit(1);
+    }
 }
 
 pub fn add_config(
@@ -110,6 +114,10 @@ pub fn add_config(
     key: Option<String>,
     with_password: bool,
 ) {
+    if key.is_some() && with_password {
+        eprintln!("Cannot use both --key and --password at the same time.");
+        return
+    };
     let mut config = load_config().unwrap_or_default();
 
     let encrypted_password = if with_password {
@@ -125,7 +133,7 @@ pub fn add_config(
         user,
         host,
         port,
-        identify_file: key,
+        identity_file: key,
         password: encrypted_password,
     };
 
@@ -179,7 +187,7 @@ pub fn list_configs() {
         let port = cfg.port.map(|p| format!(":{p}")).unwrap_or_default();
         let auth = if cfg.password.is_some() {
             "[password]"
-        } else if cfg.identify_file.is_some() {
+        } else if cfg.identity_file.is_some() {
             "[key]"
         } else {
             "[passwordless]"
