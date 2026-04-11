@@ -23,7 +23,7 @@ xattr -d com.apple.quarantine /usr/local/bin/twc  # bypass Gatekeeper
 ### macOS (Intel)
 
 ```bash
-curl -L https://github.com/YOUR_USER/twenty-two-port-connection/releases/latest/download/twc-macos-x86_64 -o twc
+curl -L https://github.com/stillouyng/twenty-two-port-connection/releases/latest/download/twc-macos-x86_64 -o twc
 chmod +x twc
 sudo mv twc /usr/local/bin/
 xattr -d com.apple.quarantine /usr/local/bin/twc
@@ -32,14 +32,14 @@ xattr -d com.apple.quarantine /usr/local/bin/twc
 ### Linux
 
 ```bash
-curl -L https://github.com/YOUR_USER/twenty-two-port-connection/releases/latest/download/twc-linux-x86_64 -o twc
+curl -L https://github.com/stillouyng/twenty-two-port-connection/releases/latest/download/twc-linux-x86_64 -o twc
 chmod +x twc
 sudo mv twc /usr/local/bin/
 ```
 
 ### Windows
 
-Download `twc-windows-x86_64.exe` from the [latest release](https://github.com/YOUR_USER/twenty-two-port-connection/releases/latest), rename it to `twc.exe` and place it somewhere in your PATH.
+Download `twc-windows-x86_64.exe` from the [latest release](https://github.com/stillouyng/twenty-two-port-connection/releases/latest), rename it to `twc.exe` and place it somewhere in your PATH.
 
 ## Usage
 
@@ -82,7 +82,8 @@ On macOS the agent persists across reboots via Keychain. On Linux you'll need to
 ## Building from source
 
 ```bash
-git clone https://github.com/YOUR_USER/twenty-two-port-connection
+git clone https://github.com/stillouyng/twenty-two-port-connection
 cd twenty-two-port-connection
 cargo build --release
 ```
+a
