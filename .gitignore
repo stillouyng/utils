@@ -181,3 +181,4 @@ users_less_than_18.json
 
 
 *.lock
+cli-commands/
