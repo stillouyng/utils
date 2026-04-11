@@ -99,8 +99,7 @@ pub fn run_config(name: &str) {
             let status = child.wait().expect("SSH failed");
             exit(status.code().unwrap_or(1));
         }
-    }
-    else {
+    } else {
         eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
         exit(1);
     }
@@ -116,7 +115,7 @@ pub fn add_config(
 ) {
     if key.is_some() && with_password {
         eprintln!("Cannot use both --key and --password at the same time.");
-        return
+        return;
     };
     let mut config = load_config().unwrap_or_default();
 
