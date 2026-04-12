@@ -179,7 +179,10 @@ pub fn show_config(name: &str) {
         exit(1);
     };
 
-    let port = cfg.port.map(|p| p.to_string()).unwrap_or_else(|| "22".to_string());
+    let port = cfg
+        .port
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "22".to_string());
     let auth = if cfg.password.is_some() {
         "password".to_string()
     } else if let Some(ref key) = cfg.identity_file {
