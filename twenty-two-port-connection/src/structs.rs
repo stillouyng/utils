@@ -45,6 +45,16 @@ pub enum Command {
         long_about = "List all config profiles in format: {name} | {user}@{host}:{port} [password | key]"
     )]
     List {},
+    #[clap(
+        name = "rename",
+        about = "Rename an existing SSH config profile",
+        long_about = "Rename a saved SSH profile without changing any of its fields.
+
+        Example:
+          twc rename myserver prod
+        "
+    )]
+    Rename { name: String, new_name: String },
 }
 
 #[derive(Debug, Parser)]

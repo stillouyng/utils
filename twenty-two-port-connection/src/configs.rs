@@ -171,6 +171,25 @@ pub fn remove_config(name: &str) {
     println!("Removed config '{}'.", name);
 }
 
+pub fn rename_config(name: &str, new_name: &str) {
+    let mut config = load_config().unwrap_or_default();
+
+    if !config.contains_key(name) {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        return;
+    }
+
+    if config.contains_key(new_name) {
+        eprintln!("A profile named '{new_name}' already exists.");
+        return;
+    }
+
+    let cfg = config.remove(name).unwrap();
+    config.insert(new_name.to_string(), cfg);
+    save_config(&config).expect("Failed to save config");
+    println!("Renamed '{name}' to '{new_name}'.");
+}
+
 pub fn list_configs() {
     let config = load_config().unwrap_or_default();
 

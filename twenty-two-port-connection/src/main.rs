@@ -3,7 +3,7 @@ mod crypto;
 mod structs;
 mod types;
 
-use crate::configs::{add_config, list_configs, remove_config, run_config};
+use crate::configs::{add_config, list_configs, remove_config, rename_config, run_config};
 use crate::structs::{Cli, Command};
 use clap::Parser;
 
@@ -33,6 +33,9 @@ fn main() {
                 key.clone(),
                 *password,
             );
+        }
+        (_, Some(Command::Rename { name, new_name })) => {
+            rename_config(name, new_name);
         }
         (_, Some(Command::Remove { name })) => {
             remove_config(name);
