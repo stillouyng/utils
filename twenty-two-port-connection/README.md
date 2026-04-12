@@ -87,6 +87,6 @@ cd twenty-two-port-connection
 cargo build --release
 ```
 
-## Known bugs
+## Roadmap & known bugs
 
-See [BUGS.md](BUGS.md) for the list of known issues.
+See [ROADMAP.md](ROADMAP.md) for planned features and known issues.
