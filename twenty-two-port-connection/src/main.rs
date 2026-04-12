@@ -3,7 +3,9 @@ mod crypto;
 mod structs;
 mod types;
 
-use crate::configs::{add_config, edit_config, list_configs, remove_config, rename_config, run_config, show_config};
+use crate::configs::{
+    add_config, edit_config, list_configs, remove_config, rename_config, run_config, show_config,
+};
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
 
