@@ -171,6 +171,30 @@ pub fn remove_config(name: &str) {
     println!("Removed config '{}'.", name);
 }
 
+pub fn show_config(name: &str) {
+    let config = load_config().unwrap_or_default();
+
+    let Some(cfg) = config.get(name) else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        exit(1);
+    };
+
+    let port = cfg.port.map(|p| p.to_string()).unwrap_or_else(|| "22".to_string());
+    let auth = if cfg.password.is_some() {
+        "password".to_string()
+    } else if let Some(ref key) = cfg.identity_file {
+        format!("key ({})", key)
+    } else {
+        "passwordless".to_string()
+    };
+
+    println!("Name:  {name}");
+    println!("User:  {}", cfg.user);
+    println!("Host:  {}", cfg.host);
+    println!("Port:  {port}");
+    println!("Auth:  {auth}");
+}
+
 pub fn list_configs() {
     let config = load_config().unwrap_or_default();
 

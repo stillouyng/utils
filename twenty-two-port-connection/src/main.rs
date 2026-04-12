@@ -3,7 +3,7 @@ mod crypto;
 mod structs;
 mod types;
 
-use crate::configs::{add_config, list_configs, remove_config, run_config};
+use crate::configs::{add_config, list_configs, remove_config, run_config, show_config};
 use crate::structs::{Cli, Command};
 use clap::Parser;
 
@@ -39,6 +39,9 @@ fn main() {
         }
         (_, Some(Command::List {})) => {
             list_configs();
+        }
+        (_, Some(Command::Show { name })) => {
+            show_config(name);
         }
         _ => {
             println!("Use 'twc <name>' or 'twc add <name> ...'")
