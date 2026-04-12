@@ -1,5 +1,5 @@
 use crate::crypto::{decrypt, encrypt};
-use crate::structs::SSHConfig;
+use crate::structs::{EditArgs, SSHConfig};
 use crate::types::ConfigMap;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_to_string};
@@ -139,6 +139,74 @@ pub fn add_config(
     config.insert(name.to_string(), ssh_config);
     save_config(&config).expect("Failed to save config");
     println!("Added config '{}'.", name);
+}
+
+pub fn edit_config(name: &str, args: EditArgs) {
+    if args.key.is_some() && args.remove_key {
+        eprintln!("Cannot use both --key and --remove-key at the same time.");
+        return;
+    }
+    if args.with_password && args.remove_password {
+        eprintln!("Cannot use both --password and --remove-password at the same time.");
+        return;
+    }
+
+    let mut config = load_config().unwrap_or_default();
+
+    let Some(cfg) = config.get_mut(name) else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        return;
+    };
+
+    if args.user.is_none()
+        && args.host.is_none()
+        && args.port.is_none()
+        && args.key.is_none()
+        && !args.remove_key
+        && !args.with_password
+        && !args.remove_password
+    {
+        println!("Nothing to update.");
+        return;
+    }
+
+    let will_have_key = (cfg.identity_file.is_some() && !args.remove_key) || args.key.is_some();
+    let will_have_password =
+        (cfg.password.is_some() && !args.remove_password) || args.with_password;
+
+    if will_have_key && will_have_password {
+        eprintln!("Conflict: profile would end up with both a key and a password.");
+        eprintln!("Use --remove-key or --remove-password to resolve.");
+        return;
+    }
+
+    if let Some(u) = args.user {
+        cfg.user = u;
+    }
+    if let Some(h) = args.host {
+        cfg.host = h;
+    }
+    if let Some(p) = args.port {
+        cfg.port = Some(p);
+    }
+
+    if args.remove_key {
+        cfg.identity_file = None;
+    } else if let Some(k) = args.key {
+        cfg.identity_file = Some(k);
+    }
+
+    if args.remove_password {
+        cfg.password = None;
+    } else if args.with_password {
+        let ssh_pass =
+            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password");
+        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+        cfg.password = Some(encrypt(&ssh_pass, &master));
+    }
+
+    save_config(&config).expect("Failed to save config");
+    println!("Updated config '{name}'.");
 }
 
 pub fn load_config() -> Result<ConfigMap, Box<dyn std::error::Error>> {
