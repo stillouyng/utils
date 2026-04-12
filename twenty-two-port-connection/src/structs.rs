@@ -50,6 +50,7 @@ pub enum Command {
 #[derive(Debug, Parser)]
 #[clap(
     name = "twc",
+    version,
     about = "Tiny wrapper for SSH connections",
     long_about = "twc — a tiny SSH connection manager.
 
