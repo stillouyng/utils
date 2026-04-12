@@ -81,7 +81,7 @@ pub struct SSHConfig {
     #[serde(default)]
     pub port: Option<u16>,
 
-    #[serde(default)]
+    #[serde(default, alias = "indentify_file")]
     pub identity_file: Option<String>,
 
     #[serde(default)]
