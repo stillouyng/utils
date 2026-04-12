@@ -162,11 +162,23 @@ pub fn load_config() -> Result<ConfigMap, Box<dyn std::error::Error>> {
 pub fn remove_config(name: &str) {
     let mut config = load_config().unwrap_or_default();
 
-    if config.remove(name).is_none() {
+    if !config.contains_key(name) {
         eprintln!("No config named '{}' found.", name);
         return;
     }
 
+    print!("Remove '{name}'? [y/N] ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+
+    if input.trim().to_lowercase() != "y" {
+        println!("Aborted.");
+        return;
+    }
+
+    config.remove(name);
     save_config(&config).expect("Failed to save config");
     println!("Removed config '{}'.", name);
 }
