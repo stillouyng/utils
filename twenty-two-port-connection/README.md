@@ -86,3 +86,7 @@ git clone https://github.com/stillouyng/twenty-two-port-connection
 cd twenty-two-port-connection
 cargo build --release
 ```
+
+## Known bugs
+
+See [BUGS.md](BUGS.md) for the list of known issues.
