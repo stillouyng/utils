@@ -45,6 +45,16 @@ pub enum Command {
         long_about = "List all config profiles in format: {name} | {user}@{host}:{port} [password | key]"
     )]
     List {},
+    #[clap(
+        name = "show",
+        about = "Show details of a single SSH config profile",
+        long_about = "Show all fields of a saved SSH profile.
+
+        Example:
+          twc show myserver
+        "
+    )]
+    Show { name: String },
 }
 
 #[derive(Debug, Parser)]
