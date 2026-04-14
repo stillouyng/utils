@@ -4,8 +4,8 @@ mod structs;
 mod types;
 
 use crate::configs::{
-    add_config, copy_config, copy_sp_config, edit_config, list_configs, remove_config, rename_config,
-    run_config, show_config,
+    add_config, copy_config, copy_sp_config, edit_config, list_configs, remove_config,
+    rename_config, run_config, show_config,
 };
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
