@@ -12,7 +12,8 @@ pub enum Command {
           twc add myserver alice 192.168.1.1
           twc add myserver alice 192.168.1.1 --port 2222
           twc add myserver alice 192.168.1.1 --key ~/.ssh/id_rsa
-          twc add myserver alice 192.168.1.1 --password   (prompts for SSH password + master key)
+          twc add myserver alice 192.168.1.1 --password        (prompts for SSH password + master key)
+          twc add myserver alice 192.168.1.1 --sudo-password   (prompts for sudo password + master key)
         "
     )]
     Add {
@@ -28,6 +29,11 @@ pub enum Command {
             help = "Store an encrypted SSH password (you will be prompted for the password and a master key)"
         )]
         password: bool,
+        #[clap(
+            long,
+            help = "Store an encrypted sudo password (you will be prompted for the password and a master key)"
+        )]
+        sudo_password: bool,
     },
     #[clap(
         name = "remove",
@@ -42,7 +48,7 @@ pub enum Command {
     #[clap(
         name = "list",
         about = "List all config profiles",
-        long_about = "List all config profiles in format: {name} | {user}@{host}:{port} [password | key]"
+        long_about = "List all config profiles in format: {name} | {user}@{host}:{port} [password | key] [sudo]"
     )]
     List {},
     #[clap(
@@ -91,6 +97,8 @@ pub enum Command {
           twc edit myserver --port 2222 --key ~/.ssh/id_ed25519
           twc edit myserver --remove-key --password
           twc edit myserver --remove-password --password
+          twc edit myserver --sudo-password
+          twc edit myserver --remove-sudo-password
         "
     )]
     Edit {
@@ -112,7 +120,25 @@ pub enum Command {
         password: bool,
         #[clap(long, help = "Remove the stored SSH password")]
         remove_password: bool,
+        #[clap(
+            long,
+            help = "Set or change the encrypted sudo password (you will be prompted)"
+        )]
+        sudo_password: bool,
+        #[clap(long, help = "Remove the stored sudo password")]
+        remove_sudo_password: bool,
     },
+    #[clap(
+        name = "copy-sp",
+        about = "Copy the sudo password for a profile to clipboard",
+        long_about = "Prompts for the master key, decrypts the stored sudo password, and copies it
+        to clipboard. The password is hidden in console output.
+
+        Example:
+          twc copy-sp myserver
+        "
+    )]
+    CopySp { name: String },
 }
 
 #[derive(Debug, Parser)]
@@ -151,6 +177,8 @@ pub struct EditArgs {
     pub remove_key: bool,
     pub with_password: bool,
     pub remove_password: bool,
+    pub with_sudo_password: bool,
+    pub remove_sudo_password: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -166,6 +194,9 @@ pub struct SSHConfig {
 
     #[serde(default)]
     pub password: Option<EncryptedSecret>,
+
+    #[serde(default)]
+    pub sudo_password: Option<EncryptedSecret>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

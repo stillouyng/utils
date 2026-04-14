@@ -112,6 +112,7 @@ pub fn add_config(
     port: Option<u16>,
     key: Option<String>,
     with_password: bool,
+    with_sudo_password: bool,
 ) {
     if key.is_some() && with_password {
         eprintln!("Cannot use both --key and --password at the same time.");
@@ -128,12 +129,22 @@ pub fn add_config(
         None
     };
 
+    let encrypted_sudo_password = if with_sudo_password {
+        let sudo_pass =
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password");
+        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+        Some(encrypt(&sudo_pass, &master))
+    } else {
+        None
+    };
+
     let ssh_config = SSHConfig {
         user,
         host,
         port,
         identity_file: key,
         password: encrypted_password,
+        sudo_password: encrypted_sudo_password,
     };
 
     config.insert(name.to_string(), ssh_config);
@@ -148,6 +159,10 @@ pub fn edit_config(name: &str, args: EditArgs) {
     }
     if args.with_password && args.remove_password {
         eprintln!("Cannot use both --password and --remove-password at the same time.");
+        return;
+    }
+    if args.with_sudo_password && args.remove_sudo_password {
+        eprintln!("Cannot use both --sudo-password and --remove-sudo-password at the same time.");
         return;
     }
 
@@ -165,6 +180,8 @@ pub fn edit_config(name: &str, args: EditArgs) {
         && !args.remove_key
         && !args.with_password
         && !args.remove_password
+        && !args.with_sudo_password
+        && !args.remove_sudo_password
     {
         println!("Nothing to update.");
         return;
@@ -203,6 +220,15 @@ pub fn edit_config(name: &str, args: EditArgs) {
             rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password");
         let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
         cfg.password = Some(encrypt(&ssh_pass, &master));
+    }
+
+    if args.remove_sudo_password {
+        cfg.sudo_password = None;
+    } else if args.with_sudo_password {
+        let sudo_pass =
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password");
+        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+        cfg.sudo_password = Some(encrypt(&sudo_pass, &master));
     }
 
     save_config(&config).expect("Failed to save config");
@@ -270,12 +296,18 @@ pub fn show_config(name: &str) {
     } else {
         "passwordless".to_string()
     };
+    let sudo = if cfg.sudo_password.is_some() {
+        "Set"
+    } else {
+        "Unset"
+    };
 
     println!("Name:  {name}");
     println!("User:  {}", cfg.user);
     println!("Host:  {}", cfg.host);
     println!("Port:  {port}");
     println!("Auth:  {auth}");
+    println!("Sudo:  {sudo}");
 }
 
 pub fn rename_config(name: &str, new_name: &str) {
@@ -358,6 +390,43 @@ pub fn list_configs() {
         } else {
             "[passwordless]"
         };
-        println!("{name} | {}@{}{port} {auth}", cfg.user, cfg.host);
+        let sudo = if cfg.sudo_password.is_some() {
+            " [sudo]"
+        } else {
+            ""
+        };
+        println!("{name} | {}@{}{port} {auth}{sudo}", cfg.user, cfg.host);
     }
+}
+
+pub fn copy_sp_config(name: &str) {
+    let config = load_config().unwrap_or_default();
+
+    let Some(cfg) = config.get(name) else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        exit(1);
+    };
+
+    let Some(ref encrypted) = cfg.sudo_password else {
+        eprintln!("Profile '{name}' has no sudo password stored.");
+        eprintln!("Use 'twc edit {name} --sudo-password' to add one.");
+        exit(1);
+    };
+
+    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+
+    let sudo_password = match decrypt(encrypted, &master) {
+        Some(p) => p,
+        None => {
+            eprintln!("Wrong master key or corrupted data.");
+            exit(1);
+        }
+    };
+
+    let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
+    clipboard
+        .set_text(&sudo_password)
+        .expect("Failed to copy to clipboard");
+
+    println!("Sudo password for '{name}' copied to clipboard.");
 }
