@@ -106,9 +106,10 @@ fn main() {
                 name,
                 share,
                 for_key,
+                ttl,
             }),
         ) => {
-            copy_config(name, *share, for_key.as_deref());
+            copy_config(name, *share, for_key.as_deref(), ttl.as_deref());
         }
         (_, Some(Command::ShareKey {})) => {
             show_share_key();

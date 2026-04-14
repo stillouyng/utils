@@ -8,6 +8,56 @@ use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio, exit};
 
+/// Parses a TTL string like `"30M"`, `"2H"`, `"7d"` into seconds.
+/// Units: `s` seconds, `M` minutes, `H` hours, `d` days, `m` months (30d), `y` years (365d).
+fn parse_ttl(s: &str) -> Option<u64> {
+    if s.is_empty() {
+        return None;
+    }
+    let (num_str, unit) = s.split_at(s.len() - 1);
+    let n: u64 = num_str.parse().ok()?;
+    let secs = match unit {
+        "s" => n,
+        "M" => n * 60,
+        "H" => n * 3600,
+        "d" => n * 86400,
+        "m" => n * 30 * 86400,
+        "y" => n * 365 * 86400,
+        _ => return None,
+    };
+    Some(secs)
+}
+
+/// Formats a duration in seconds as a human-readable string, e.g. `"2h 30m"`.
+fn format_duration(mut secs: u64) -> String {
+    if secs == 0 {
+        return "0s".to_string();
+    }
+    let years = secs / (365 * 86400);
+    secs %= 365 * 86400;
+    let days = secs / 86400;
+    secs %= 86400;
+    let hours = secs / 3600;
+    secs %= 3600;
+    let mins = secs / 60;
+    let secs = secs % 60;
+
+    let parts: Vec<String> = [
+        (years, "y"),
+        (days, "d"),
+        (hours, "h"),
+        (mins, "m"),
+        (secs, "s"),
+    ]
+    .iter()
+    .filter(|(v, _)| *v > 0)
+    .take(2) // show at most two most-significant units
+    .map(|(v, u)| format!("{v}{u}"))
+    .collect();
+
+    parts.join(" ")
+}
+
 const RESERVED_NAMES: &[&str] = &[
     "add",
     "remove",
@@ -18,6 +68,7 @@ const RESERVED_NAMES: &[&str] = &[
     "copy",
     "copy-sp",
     "share-key",
+    "help"
 ];
 
 fn is_reserved(name: &str) -> bool {
@@ -356,7 +407,7 @@ pub fn rename_config(name: &str, new_name: &str) {
     println!("Renamed '{name}' to '{new_name}'.");
 }
 
-pub fn copy_config(name: &str, share: bool, for_key: Option<&str>) {
+pub fn copy_config(name: &str, share: bool, for_key: Option<&str>, ttl: Option<&str>) {
     let config = load_config().unwrap_or_default();
 
     let Some(cfg) = config.get(name) else {
@@ -364,13 +415,18 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>) {
         exit(1);
     };
 
+    if ttl.is_some() && !share {
+        eprintln!("--ttl has no effect without --share.");
+        exit(1);
+    }
+
     if share {
         let recipient_key = for_key.unwrap_or_else(|| {
             eprintln!("--share requires --for <PUBKEY>.");
             eprintln!("The recipient can get their key with: twc share-key");
             exit(1);
         });
-        share_config(name, cfg, recipient_key);
+        share_config(name, cfg, recipient_key, ttl);
         return;
     }
 
@@ -407,7 +463,7 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>) {
     }
 }
 
-fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str) {
+fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Option<&str>) {
     let recipient_pub = match parse_pubkey(recipient_key_str) {
         Some(k) => k,
         None => {
@@ -451,6 +507,27 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str) {
         None
     };
 
+    let expires_at = if let Some(ttl_str) = ttl {
+        match parse_ttl(ttl_str) {
+            Some(secs) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("System clock is before Unix epoch")
+                    .as_secs();
+                Some(now + secs)
+            }
+            None => {
+                eprintln!(
+                    "Invalid TTL '{ttl_str}'. Use a number followed by a unit: \
+                     30s, 15M, 2H, 7d, 1m, 1y"
+                );
+                exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     let blob = ShareBlob {
         name: name.to_string(),
         user: cfg.user.clone(),
@@ -459,6 +536,7 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str) {
         password: password_plain,
         sudo_password: sudo_password_plain,
         key_bytes,
+        expires_at,
     };
 
     let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
@@ -472,6 +550,15 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str) {
         .expect("Failed to copy to clipboard");
 
     println!("Profile '{name}' encrypted for recipient and copied to clipboard.");
+    if let Some(secs) = expires_at.map(|exp| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        exp.saturating_sub(now)
+    }) {
+        println!("Expires in: {}", format_duration(secs));
+    }
     println!("Send the clipboard contents to the recipient.");
     println!("They can import it with: twc add --from-clip");
 }
@@ -548,6 +635,20 @@ pub fn import_from_clip() {
             exit(1);
         }
     };
+
+    if let Some(expires_at) = blob.expires_at {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("System clock is before Unix epoch")
+            .as_secs();
+        if now > expires_at {
+            let expired_ago = format_duration(now.saturating_sub(expires_at));
+            eprintln!("This share blob expired {expired_ago} ago and cannot be imported.");
+            exit(1);
+        }
+        let remaining = format_duration(expires_at.saturating_sub(now));
+        println!("(blob valid for {remaining} more)");
+    }
 
     if is_reserved(&blob.name) {
         eprintln!(

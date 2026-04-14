@@ -14,7 +14,7 @@ pub enum Command {
           twc add myserver alice 192.168.1.1 --key ~/.ssh/id_rsa
           twc add myserver alice 192.168.1.1 --password        (prompts for SSH password + master key)
           twc add myserver alice 192.168.1.1 --sudo-password   (prompts for sudo password + master key)
-          twc add --from-clip                                   (import a shared profile from clipboard)
+          twc add --from-clip                                  (import a shared profile from clipboard)
         "
     )]
     Add {
@@ -91,6 +91,7 @@ pub enum Command {
         Examples:
           twc copy myserver
           twc copy myserver --share --for twc1:<pubkey>
+          twc copy myserver --share --for twc1:<pubkey> --ttl 24H
         "
     )]
     Copy {
@@ -106,6 +107,12 @@ pub enum Command {
             help = "Recipient's twc public key (required with --share). Get it with: twc share-key"
         )]
         for_key: Option<String>,
+        #[clap(
+            long,
+            value_name = "DURATION",
+            help = "Blob expiry, e.g. 30s, 15M, 2H, 7d, 1m, 1y (requires --share)"
+        )]
+        ttl: Option<String>,
     },
     #[clap(
         name = "edit",
@@ -187,7 +194,7 @@ pub enum Command {
     Stores SSH profiles locally and connects with a single command.
     Passwords are encrypted with AES-256-GCM and protected by a master key.
     Usage:
-      twc <name>                                       Connect using a saved profile
+      twc <name>                                Connect using a saved profile
       twc add <name> <user> <host> [options]    Save a new SSH profile
       twc remove <name>                         Delete a saved profile
 
@@ -266,6 +273,10 @@ pub struct EciesEnvelope {
 /// exclusively by the ECIES outer encryption.  On import the recipient
 /// re-encrypts them under their own master key before writing to disk —
 /// the sender's master key never leaves the sender's machine.
+///
+/// `expires_at` is a Unix timestamp (seconds).  Because it lives in the
+/// authenticated plaintext, AES-256-GCM makes it tamper-proof — nobody
+/// can extend the TTL without the recipient's private key.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShareBlob {
     pub name: String,
@@ -279,4 +290,7 @@ pub struct ShareBlob {
     /// Raw private key file bytes for key-based profiles.  Written to
     /// `~/.ssh/twc_<name>` on the recipient's machine by `--from-clip`.
     pub key_bytes: Option<Vec<u8>>,
+    /// Optional expiry as a Unix timestamp.  `twc add --from-clip` rejects
+    /// the blob if `now > expires_at`.
+    pub expires_at: Option<u64>,
 }
