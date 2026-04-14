@@ -6,6 +6,14 @@ use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio, exit};
 
+const RESERVED_NAMES: &[&str] = &[
+    "add", "remove", "list", "rename", "show", "edit", "copy", "copy-sp",
+];
+
+fn is_reserved(name: &str) -> bool {
+    RESERVED_NAMES.contains(&name)
+}
+
 fn config_path() -> PathBuf {
     dirs::config_dir()
         .expect("Cannot find config directory")
@@ -114,6 +122,10 @@ pub fn add_config(
     with_password: bool,
     with_sudo_password: bool,
 ) {
+    if is_reserved(name) {
+        eprintln!("'{name}' is a reserved command name and cannot be used as a profile name.");
+        return;
+    }
     if key.is_some() && with_password {
         eprintln!("Cannot use both --key and --password at the same time.");
         return;
@@ -315,6 +327,11 @@ pub fn rename_config(name: &str, new_name: &str) {
 
     if !config.contains_key(name) {
         eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        return;
+    }
+
+    if is_reserved(new_name) {
+        eprintln!("'{new_name}' is a reserved command name and cannot be used as a profile name.");
         return;
     }
 
