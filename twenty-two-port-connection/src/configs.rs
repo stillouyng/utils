@@ -68,7 +68,7 @@ const RESERVED_NAMES: &[&str] = &[
     "copy",
     "copy-sp",
     "share-key",
-    "help"
+    "help",
 ];
 
 fn is_reserved(name: &str) -> bool {
