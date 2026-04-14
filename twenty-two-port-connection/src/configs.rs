@@ -1,5 +1,6 @@
-use crate::crypto::{decrypt, encrypt};
-use crate::structs::{EditArgs, SSHConfig, ShareBlob};
+use crate::crypto::{decrypt, ecies_decrypt, ecies_encrypt, encrypt};
+use crate::identity::{get_or_create_pubkey, get_pubkey_string, load_private_key, parse_pubkey};
+use crate::structs::{EciesEnvelope, EditArgs, SSHConfig, ShareBlob};
 use crate::types::ConfigMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use std::collections::HashMap;
@@ -8,7 +9,15 @@ use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio, exit};
 
 const RESERVED_NAMES: &[&str] = &[
-    "add", "remove", "list", "rename", "show", "edit", "copy", "copy-sp",
+    "add",
+    "remove",
+    "list",
+    "rename",
+    "show",
+    "edit",
+    "copy",
+    "copy-sp",
+    "share-key",
 ];
 
 fn is_reserved(name: &str) -> bool {
@@ -347,7 +356,7 @@ pub fn rename_config(name: &str, new_name: &str) {
     println!("Renamed '{name}' to '{new_name}'.");
 }
 
-pub fn copy_config(name: &str, share: bool) {
+pub fn copy_config(name: &str, share: bool, for_key: Option<&str>) {
     let config = load_config().unwrap_or_default();
 
     let Some(cfg) = config.get(name) else {
@@ -356,7 +365,12 @@ pub fn copy_config(name: &str, share: bool) {
     };
 
     if share {
-        share_config(name, cfg);
+        let recipient_key = for_key.unwrap_or_else(|| {
+            eprintln!("--share requires --for <PUBKEY>.");
+            eprintln!("The recipient can get their key with: twc share-key");
+            exit(1);
+        });
+        share_config(name, cfg, recipient_key);
         return;
     }
 
@@ -393,7 +407,38 @@ pub fn copy_config(name: &str, share: bool) {
     }
 }
 
-fn share_config(name: &str, cfg: &SSHConfig) {
+fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str) {
+    let recipient_pub = match parse_pubkey(recipient_key_str) {
+        Some(k) => k,
+        None => {
+            eprintln!("Invalid recipient public key. Expected format: twc1:<base64>");
+            exit(1);
+        }
+    };
+
+    // Only prompt the master key if there are stored secrets to decrypt.
+    let needs_master = cfg.password.is_some() || cfg.sudo_password.is_some();
+
+    let (password_plain, sudo_password_plain) = if needs_master {
+        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+
+        let pw = cfg.password.as_ref().map(|enc| {
+            decrypt(enc, &master).unwrap_or_else(|| {
+                eprintln!("Wrong master key or corrupted data.");
+                exit(1);
+            })
+        });
+        let spw = cfg.sudo_password.as_ref().map(|enc| {
+            decrypt(enc, &master).unwrap_or_else(|| {
+                eprintln!("Wrong master key or corrupted data.");
+                exit(1);
+            })
+        });
+        (pw, spw)
+    } else {
+        (None, None)
+    };
+
     let key_bytes = if let Some(ref key_path) = cfg.identity_file {
         match std::fs::read(key_path) {
             Ok(bytes) => Some(bytes),
@@ -411,40 +456,40 @@ fn share_config(name: &str, cfg: &SSHConfig) {
         user: cfg.user.clone(),
         host: cfg.host.clone(),
         port: cfg.port,
-        password: cfg.password.clone(),
-        sudo_password: cfg.sudo_password.clone(),
+        password: password_plain,
+        sudo_password: sudo_password_plain,
         key_bytes,
     };
 
-    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
     let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
-    let encrypted = encrypt(&blob_json, &master);
-    let encrypted_json = serde_json::to_string(&encrypted).expect("Serialization failed");
-    let clip_content = format!("TWC1:{}", B64.encode(encrypted_json.as_bytes()));
+    let envelope = ecies_encrypt(blob_json.as_bytes(), &recipient_pub);
+    let envelope_json = serde_json::to_string(&envelope).expect("Serialization failed");
+    let clip_content = format!("TWC2:{}", B64.encode(envelope_json.as_bytes()));
 
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     clipboard
         .set_text(&clip_content)
         .expect("Failed to copy to clipboard");
 
-    println!("Profile '{name}' copied to clipboard as a shareable blob.");
-    println!("Recipient can import it with: twc add --from-clip");
+    println!("Profile '{name}' encrypted for recipient and copied to clipboard.");
+    println!("Send the clipboard contents to the recipient.");
+    println!("They can import it with: twc add --from-clip");
 }
 
 pub fn import_from_clip() {
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     let content = clipboard.get_text().expect("Failed to read clipboard");
 
-    let b64 = match content.strip_prefix("TWC1:") {
+    let b64 = match content.trim().strip_prefix("TWC2:") {
         Some(s) => s,
         None => {
-            eprintln!("Clipboard does not contain a valid twc share blob.");
+            eprintln!("Clipboard does not contain a valid twc share blob (expected TWC2: prefix).");
+            eprintln!("Make sure the sender used: twc copy <name> --share --for <your-key>");
             exit(1);
         }
     };
 
-    let encrypted_json_bytes = match B64.decode(b64) {
+    let envelope_json_bytes = match B64.decode(b64) {
         Ok(b) => b,
         Err(_) => {
             eprintln!("Invalid base64 in clipboard blob.");
@@ -452,7 +497,7 @@ pub fn import_from_clip() {
         }
     };
 
-    let encrypted_json = match String::from_utf8(encrypted_json_bytes) {
+    let envelope_json = match String::from_utf8(envelope_json_bytes) {
         Ok(s) => s,
         Err(_) => {
             eprintln!("Corrupted clipboard blob (invalid UTF-8).");
@@ -460,20 +505,38 @@ pub fn import_from_clip() {
         }
     };
 
-    let encrypted = match serde_json::from_str(&encrypted_json) {
+    let envelope: EciesEnvelope = match serde_json::from_str(&envelope_json) {
         Ok(e) => e,
         Err(_) => {
-            eprintln!("Corrupted clipboard blob (cannot parse encrypted envelope).");
+            eprintln!("Corrupted clipboard blob (cannot parse ECIES envelope).");
             exit(1);
         }
     };
 
+    // Master key serves triple duty: decrypt identity private key, ECIES-decrypt
+    // the blob, and re-encrypt the imported secrets under the recipient's key.
     let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
 
-    let blob_json = match decrypt(&encrypted, &master) {
-        Some(s) => s,
+    let priv_key = match load_private_key(&master) {
+        Some(k) => k,
         None => {
-            eprintln!("Wrong master key or corrupted blob.");
+            eprintln!("No identity key found. Run 'twc share-key' first to generate yours.");
+            exit(1);
+        }
+    };
+
+    let blob_json_bytes = match ecies_decrypt(&envelope, &priv_key) {
+        Some(b) => b,
+        None => {
+            eprintln!("Decryption failed — wrong master key, wrong identity, or corrupted blob.");
+            exit(1);
+        }
+    };
+
+    let blob_json = match String::from_utf8(blob_json_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("Corrupted blob content.");
             exit(1);
         }
     };
@@ -504,6 +567,10 @@ pub fn import_from_clip() {
         exit(1);
     }
 
+    // Re-encrypt plaintext secrets under the recipient's own master key.
+    let encrypted_password = blob.password.map(|pw| encrypt(&pw, &master));
+    let encrypted_sudo = blob.sudo_password.map(|pw| encrypt(&pw, &master));
+
     let identity_file = if let Some(key_bytes) = blob.key_bytes {
         let ssh_dir = dirs::home_dir()
             .expect("Cannot find home directory")
@@ -532,13 +599,30 @@ pub fn import_from_clip() {
         host: blob.host,
         port: blob.port,
         identity_file,
-        password: blob.password,
-        sudo_password: blob.sudo_password,
+        password: encrypted_password,
+        sudo_password: encrypted_sudo,
     };
 
     config.insert(blob.name.clone(), ssh_config);
     save_config(&config).expect("Failed to save config");
     println!("Imported profile '{}'.", blob.name);
+}
+
+/// Shows the user's twc public key.  Auto-generates the X25519 keypair on
+/// first use (prompts for master key to encrypt the stored private key).
+pub fn show_share_key() {
+    if let Some(pubkey) = get_pubkey_string() {
+        println!("{pubkey}");
+    } else {
+        println!("No identity key found — generating one now.");
+        let master = rpassword::prompt_password("Master key (to protect your new identity key): ")
+            .expect("Failed to read master key");
+        let pubkey = get_or_create_pubkey(&master);
+        println!("Your twc public key:");
+        println!("{pubkey}");
+        println!();
+        println!("Share this with anyone who wants to send you a profile.");
+    }
 }
 
 pub fn list_configs() {

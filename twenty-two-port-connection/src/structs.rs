@@ -90,16 +90,22 @@ pub enum Command {
 
         Examples:
           twc copy myserver
-          twc copy myserver --share   (generates a portable blob and copies it to clipboard)
+          twc copy myserver --share --for twc1:<pubkey>
         "
     )]
     Copy {
         name: String,
         #[clap(
             long,
-            help = "Generate a portable shareable blob and copy it to clipboard for import on another machine"
+            help = "Generate a portable shareable blob encrypted for the recipient"
         )]
         share: bool,
+        #[clap(
+            long,
+            value_name = "PUBKEY",
+            help = "Recipient's twc public key (required with --share). Get it with: twc share-key"
+        )]
+        for_key: Option<String>,
     },
     #[clap(
         name = "edit",
@@ -142,6 +148,22 @@ pub enum Command {
         #[clap(long, help = "Remove the stored sudo password")]
         remove_sudo_password: bool,
     },
+    #[clap(
+        name = "share-key",
+        about = "Show your twc public key for receiving shared profiles",
+        long_about = "Display your twc public key so others can encrypt profiles for you.
+
+        The X25519 keypair is generated automatically on first use and the private
+        key is stored encrypted (Argon2 + AES-256-GCM) under your master key.
+
+        Share the printed key with anyone who wants to send you a profile via
+        'twc copy <name> --share --for <your-key>'.
+
+        Example:
+          twc share-key
+        "
+    )]
+    ShareKey {},
     #[clap(
         name = "copy-sp",
         about = "Copy the sudo password for a profile to clipboard",
@@ -220,23 +242,40 @@ pub struct EncryptedSecret {
     pub ciphertext: Vec<u8>,
 }
 
-/// Portable profile blob used by `twc copy --share` / `twc add --from-clip`.
+/// ECIES envelope produced by `twc copy --share`.
 ///
-/// The whole struct is serialised to JSON, encrypted with AES-256-GCM
-/// (using the sender's master key), and the resulting [`EncryptedSecret`] is
-/// JSON-encoded then base64-encoded before being placed on the clipboard as
-/// `TWC1:<base64>`.
+/// Contains an ephemeral X25519 public key and an AES-256-GCM ciphertext whose
+/// plaintext is the JSON-serialised [`ShareBlob`].  The AES key is derived via
+/// HKDF-SHA256 from the X25519 shared secret.
+///
+/// Serialised to JSON, base64-encoded, and placed on the clipboard as
+/// `TWC2:<base64>`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EciesEnvelope {
+    /// Sender's ephemeral X25519 public key (32 bytes).
+    pub eph_pub: Vec<u8>,
+    /// AES-256-GCM nonce (12 bytes).
+    pub nonce: Vec<u8>,
+    /// Encrypted [`ShareBlob`] JSON.
+    pub ciphertext: Vec<u8>,
+}
+
+/// Portable profile blob — the plaintext inside an [`EciesEnvelope`].
+///
+/// Secrets travel as **plaintext** inside the blob; they are protected
+/// exclusively by the ECIES outer encryption.  On import the recipient
+/// re-encrypts them under their own master key before writing to disk —
+/// the sender's master key never leaves the sender's machine.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShareBlob {
     pub name: String,
     pub user: String,
     pub host: String,
     pub port: Option<u16>,
-    /// Already-encrypted SSH password (travels as-is; recipient must use the
-    /// same master key to decrypt it later).
-    pub password: Option<EncryptedSecret>,
-    /// Already-encrypted sudo password (same note as above).
-    pub sudo_password: Option<EncryptedSecret>,
+    /// Plaintext SSH password (only present for password-auth profiles).
+    pub password: Option<String>,
+    /// Plaintext sudo password.
+    pub sudo_password: Option<String>,
     /// Raw private key file bytes for key-based profiles.  Written to
     /// `~/.ssh/twc_<name>` on the recipient's machine by `--from-clip`.
     pub key_bytes: Option<Vec<u8>>,

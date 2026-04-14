@@ -1,11 +1,12 @@
 mod configs;
 mod crypto;
+mod identity;
 mod structs;
 mod types;
 
 use crate::configs::{
     add_config, copy_config, copy_sp_config, edit_config, import_from_clip, list_configs,
-    remove_config, rename_config, run_config, show_config,
+    remove_config, rename_config, run_config, show_config, show_share_key,
 };
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
@@ -99,8 +100,18 @@ fn main() {
         (_, Some(Command::Show { name })) => {
             show_config(name);
         }
-        (_, Some(Command::Copy { name, share })) => {
-            copy_config(name, *share);
+        (
+            _,
+            Some(Command::Copy {
+                name,
+                share,
+                for_key,
+            }),
+        ) => {
+            copy_config(name, *share, for_key.as_deref());
+        }
+        (_, Some(Command::ShareKey {})) => {
+            show_share_key();
         }
         (_, Some(Command::CopySp { name })) => {
             copy_sp_config(name);
