@@ -4,7 +4,8 @@ mod structs;
 mod types;
 
 use crate::configs::{
-    add_config, edit_config, list_configs, remove_config, rename_config, run_config, show_config,
+    add_config, copy_config, edit_config, list_configs, remove_config, rename_config, run_config,
+    show_config,
 };
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
@@ -73,6 +74,9 @@ fn main() {
         }
         (_, Some(Command::Show { name })) => {
             show_config(name);
+        }
+        (_, Some(Command::Copy { name })) => {
+            copy_config(name);
         }
         _ => {
             println!("Use 'twc <name>' or 'twc add <name> ...'")

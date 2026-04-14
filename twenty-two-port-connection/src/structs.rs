@@ -66,6 +66,22 @@ pub enum Command {
     )]
     Show { name: String },
     #[clap(
+        name = "copy",
+        about = "Copy SSH connection info to clipboard",
+        long_about = "Copy SSH connection info to clipboard.
+
+        For password-protected profiles, prompts for the master key, decrypts the SSH password,
+        and copies 'user@host:port password' to clipboard. The password is hidden in console output.
+
+        For key-based or passwordless profiles, prints the connection string to console — there is
+        no credential to copy.
+
+        Example:
+          twc copy myserver
+        "
+    )]
+    Copy { name: String },
+    #[clap(
         name = "edit",
         about = "Edit an existing SSH config profile",
         long_about = "Edit fields of an existing SSH profile. Only specified flags are updated.

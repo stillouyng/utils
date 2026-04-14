@@ -297,6 +297,47 @@ pub fn rename_config(name: &str, new_name: &str) {
     println!("Renamed '{name}' to '{new_name}'.");
 }
 
+pub fn copy_config(name: &str) {
+    let config = load_config().unwrap_or_default();
+
+    let Some(cfg) = config.get(name) else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        exit(1);
+    };
+
+    let port = cfg.port.unwrap_or(22);
+
+    if let Some(ref encrypted) = cfg.password {
+        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+
+        let ssh_password = match decrypt(encrypted, &master) {
+            Some(p) => p,
+            None => {
+                eprintln!("Wrong master key or corrupted data.");
+                exit(1);
+            }
+        };
+
+        let content = format!("{}@{}:{} {}", cfg.user, cfg.host, port, ssh_password);
+
+        let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
+        clipboard
+            .set_text(&content)
+            .expect("Failed to copy to clipboard");
+
+        println!(
+            "Copied to clipboard: {}@{}:{} ***",
+            cfg.user, cfg.host, port
+        );
+    } else if let Some(ref key) = cfg.identity_file {
+        println!("Profile '{name}' uses key-based auth ({key}). No password to copy.");
+        println!("Connection string: {}@{}:{}", cfg.user, cfg.host, port);
+    } else {
+        println!("Profile '{name}' uses passwordless auth. No password to copy.");
+        println!("Connection string: {}@{}:{}", cfg.user, cfg.host, port);
+    }
+}
+
 pub fn list_configs() {
     let config = load_config().unwrap_or_default();
 
