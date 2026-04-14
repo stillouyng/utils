@@ -14,12 +14,13 @@ pub enum Command {
           twc add myserver alice 192.168.1.1 --key ~/.ssh/id_rsa
           twc add myserver alice 192.168.1.1 --password        (prompts for SSH password + master key)
           twc add myserver alice 192.168.1.1 --sudo-password   (prompts for sudo password + master key)
+          twc add --from-clip                                   (import a shared profile from clipboard)
         "
     )]
     Add {
-        name: String,
-        user: String,
-        host: String,
+        name: Option<String>,
+        user: Option<String>,
+        host: Option<String>,
         #[clap(long, help = "SSH port (default: 22)")]
         port: Option<u16>,
         #[clap(long, help = "Path to private key file")]
@@ -34,6 +35,11 @@ pub enum Command {
             help = "Store an encrypted sudo password (you will be prompted for the password and a master key)"
         )]
         sudo_password: bool,
+        #[clap(
+            long,
+            help = "Import a profile from a twc share blob in clipboard (name/user/host are not required)"
+        )]
+        from_clip: bool,
     },
     #[clap(
         name = "remove",
@@ -82,11 +88,19 @@ pub enum Command {
         For key-based or passwordless profiles, prints the connection string to console — there is
         no credential to copy.
 
-        Example:
+        Examples:
           twc copy myserver
+          twc copy myserver --share   (generates a portable blob and copies it to clipboard)
         "
     )]
-    Copy { name: String },
+    Copy {
+        name: String,
+        #[clap(
+            long,
+            help = "Generate a portable shareable blob and copy it to clipboard for import on another machine"
+        )]
+        share: bool,
+    },
     #[clap(
         name = "edit",
         about = "Edit an existing SSH config profile",
@@ -204,4 +218,26 @@ pub struct EncryptedSecret {
     pub salt: Vec<u8>,
     pub nonce: Vec<u8>,
     pub ciphertext: Vec<u8>,
+}
+
+/// Portable profile blob used by `twc copy --share` / `twc add --from-clip`.
+///
+/// The whole struct is serialised to JSON, encrypted with AES-256-GCM
+/// (using the sender's master key), and the resulting [`EncryptedSecret`] is
+/// JSON-encoded then base64-encoded before being placed on the clipboard as
+/// `TWC1:<base64>`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ShareBlob {
+    pub name: String,
+    pub user: String,
+    pub host: String,
+    pub port: Option<u16>,
+    /// Already-encrypted SSH password (travels as-is; recipient must use the
+    /// same master key to decrypt it later).
+    pub password: Option<EncryptedSecret>,
+    /// Already-encrypted sudo password (same note as above).
+    pub sudo_password: Option<EncryptedSecret>,
+    /// Raw private key file bytes for key-based profiles.  Written to
+    /// `~/.ssh/twc_<name>` on the recipient's machine by `--from-clip`.
+    pub key_bytes: Option<Vec<u8>>,
 }

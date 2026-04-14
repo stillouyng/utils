@@ -1,6 +1,7 @@
 use crate::crypto::{decrypt, encrypt};
-use crate::structs::{EditArgs, SSHConfig};
+use crate::structs::{EditArgs, SSHConfig, ShareBlob};
 use crate::types::ConfigMap;
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
@@ -346,13 +347,18 @@ pub fn rename_config(name: &str, new_name: &str) {
     println!("Renamed '{name}' to '{new_name}'.");
 }
 
-pub fn copy_config(name: &str) {
+pub fn copy_config(name: &str, share: bool) {
     let config = load_config().unwrap_or_default();
 
     let Some(cfg) = config.get(name) else {
         eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
         exit(1);
     };
+
+    if share {
+        share_config(name, cfg);
+        return;
+    }
 
     let port = cfg.port.unwrap_or(22);
 
@@ -385,6 +391,154 @@ pub fn copy_config(name: &str) {
         println!("Profile '{name}' uses passwordless auth. No password to copy.");
         println!("Connection string: {}@{}:{}", cfg.user, cfg.host, port);
     }
+}
+
+fn share_config(name: &str, cfg: &SSHConfig) {
+    let key_bytes = if let Some(ref key_path) = cfg.identity_file {
+        match std::fs::read(key_path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                eprintln!("Failed to read key file '{key_path}': {e}");
+                exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
+    let blob = ShareBlob {
+        name: name.to_string(),
+        user: cfg.user.clone(),
+        host: cfg.host.clone(),
+        port: cfg.port,
+        password: cfg.password.clone(),
+        sudo_password: cfg.sudo_password.clone(),
+        key_bytes,
+    };
+
+    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+
+    let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
+    let encrypted = encrypt(&blob_json, &master);
+    let encrypted_json = serde_json::to_string(&encrypted).expect("Serialization failed");
+    let clip_content = format!("TWC1:{}", B64.encode(encrypted_json.as_bytes()));
+
+    let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
+    clipboard
+        .set_text(&clip_content)
+        .expect("Failed to copy to clipboard");
+
+    println!("Profile '{name}' copied to clipboard as a shareable blob.");
+    println!("Recipient can import it with: twc add --from-clip");
+}
+
+pub fn import_from_clip() {
+    let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
+    let content = clipboard.get_text().expect("Failed to read clipboard");
+
+    let b64 = match content.strip_prefix("TWC1:") {
+        Some(s) => s,
+        None => {
+            eprintln!("Clipboard does not contain a valid twc share blob.");
+            exit(1);
+        }
+    };
+
+    let encrypted_json_bytes = match B64.decode(b64) {
+        Ok(b) => b,
+        Err(_) => {
+            eprintln!("Invalid base64 in clipboard blob.");
+            exit(1);
+        }
+    };
+
+    let encrypted_json = match String::from_utf8(encrypted_json_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("Corrupted clipboard blob (invalid UTF-8).");
+            exit(1);
+        }
+    };
+
+    let encrypted = match serde_json::from_str(&encrypted_json) {
+        Ok(e) => e,
+        Err(_) => {
+            eprintln!("Corrupted clipboard blob (cannot parse encrypted envelope).");
+            exit(1);
+        }
+    };
+
+    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+
+    let blob_json = match decrypt(&encrypted, &master) {
+        Some(s) => s,
+        None => {
+            eprintln!("Wrong master key or corrupted blob.");
+            exit(1);
+        }
+    };
+
+    let blob: ShareBlob = match serde_json::from_str(&blob_json) {
+        Ok(b) => b,
+        Err(_) => {
+            eprintln!("Failed to parse share blob.");
+            exit(1);
+        }
+    };
+
+    if is_reserved(&blob.name) {
+        eprintln!(
+            "'{}' is a reserved command name. Ask the sender to rename the profile.",
+            blob.name
+        );
+        exit(1);
+    }
+
+    let mut config = load_config().unwrap_or_default();
+
+    if config.contains_key(&blob.name) {
+        eprintln!(
+            "A profile named '{}' already exists. Remove it first with: twc remove {}",
+            blob.name, blob.name
+        );
+        exit(1);
+    }
+
+    let identity_file = if let Some(key_bytes) = blob.key_bytes {
+        let ssh_dir = dirs::home_dir()
+            .expect("Cannot find home directory")
+            .join(".ssh");
+        create_dir_all(&ssh_dir).expect("Cannot create ~/.ssh");
+
+        let key_path = ssh_dir.join(format!("twc_{}", blob.name));
+        std::fs::write(&key_path, &key_bytes).expect("Failed to write key file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                .expect("Failed to set key file permissions");
+        }
+
+        let key_path_str = key_path.to_string_lossy().to_string();
+        println!("Private key written to: {key_path_str}");
+        Some(key_path_str)
+    } else {
+        None
+    };
+
+    let ssh_config = SSHConfig {
+        user: blob.user,
+        host: blob.host,
+        port: blob.port,
+        identity_file,
+        password: blob.password,
+        sudo_password: blob.sudo_password,
+    };
+
+    config.insert(blob.name.clone(), ssh_config);
+    save_config(&config).expect("Failed to save config");
+    println!("Imported profile '{}'.", blob.name);
 }
 
 pub fn list_configs() {

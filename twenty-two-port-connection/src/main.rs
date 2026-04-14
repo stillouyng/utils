@@ -4,11 +4,12 @@ mod structs;
 mod types;
 
 use crate::configs::{
-    add_config, copy_config, copy_sp_config, edit_config, list_configs, remove_config,
-    rename_config, run_config, show_config,
+    add_config, copy_config, copy_sp_config, edit_config, import_from_clip, list_configs,
+    remove_config, rename_config, run_config, show_config,
 };
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
+use std::process::exit;
 
 fn main() {
     let cli = Cli::parse();
@@ -27,17 +28,34 @@ fn main() {
                 key,
                 password,
                 sudo_password,
+                from_clip,
             }),
         ) => {
-            add_config(
-                name,
-                user.clone(),
-                host.clone(),
-                *port,
-                key.clone(),
-                *password,
-                *sudo_password,
-            );
+            if *from_clip {
+                import_from_clip();
+            } else {
+                let name = name.as_deref().unwrap_or_else(|| {
+                    eprintln!("error: 'name' is required (omit only when using --from-clip)");
+                    exit(1);
+                });
+                let user = user.clone().unwrap_or_else(|| {
+                    eprintln!("error: 'user' is required (omit only when using --from-clip)");
+                    exit(1);
+                });
+                let host = host.clone().unwrap_or_else(|| {
+                    eprintln!("error: 'host' is required (omit only when using --from-clip)");
+                    exit(1);
+                });
+                add_config(
+                    name,
+                    user,
+                    host,
+                    *port,
+                    key.clone(),
+                    *password,
+                    *sudo_password,
+                );
+            }
         }
         (
             _,
@@ -81,8 +99,8 @@ fn main() {
         (_, Some(Command::Show { name })) => {
             show_config(name);
         }
-        (_, Some(Command::Copy { name })) => {
-            copy_config(name);
+        (_, Some(Command::Copy { name, share })) => {
+            copy_config(name, *share);
         }
         (_, Some(Command::CopySp { name })) => {
             copy_sp_config(name);
