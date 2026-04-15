@@ -11,6 +11,9 @@
 ## Known bugs
 
 - [ ] **Deduplicate master key prompt**: When `twc add` or `twc edit` is called with both `--password` and `--sudo-password`, the master key is prompted twice — once per secret — so the user could accidentally encrypt them under different keys. Prompt once and reuse the same master key for both secrets in the same invocation.
+- [ ] **`--share` help message uses wrong flag name**: The `--share` help text references `--for` instead of the correct `--for-key`.
+- [ ] **`--share --ttl` plaintext-leaks the password**: `twc copy <name> --share` decrypts secrets locally before building the blob. A recipient who receives a shared blob can call `twc copy <name>` on the imported profile and read the plaintext password — making `--ttl` expiry meaningless, since the credential is already in their store before the TTL fires.
+- [ ] **`--share --ttl` profiles not marked in storage**: Profiles imported via an expiring blob are stored without any indication they are shared or time-limited. They should be flagged as `shared` and `expired` (once past the TTL) so `twc list` / `twc show` can surface that state and so expired profiles can be rejected or auto-removed.
 
 ## Released
 
