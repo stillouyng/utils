@@ -99,7 +99,14 @@ pub fn save_config(config: &ConfigMap) -> Result<(), Box<dyn std::error::Error>>
         create_dir_all(dir)?;
     }
     let data = serde_json::to_string_pretty(config)?;
-    std::fs::write(path, data)?;
+    std::fs::write(&path, data)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
     Ok(())
 }
 
