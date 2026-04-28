@@ -7,7 +7,14 @@ A tiny SSH connection manager. Store your SSH profiles and connect with a single
 - Connect to saved SSH profiles instantly
 - Encrypted password storage (AES-256-GCM + Argon2)
 - Key-based and passwordless auth support
-- Cross-platform: Windows, Linux, macOS
+- Linux and macOS: full support including password-based auth
+- Windows: key-based and passwordless auth only (`sshpass` is not available on Windows)
+
+## Roadmap & known bugs
+
+See [ROADMAP.md](ROADMAP.md) for planned features and known issues.
+
+Also, make sure you checked [VULNERABILITIES.md](VULNERABILITIES.md) for known security limitations.
 
 ## Installation
 
@@ -40,6 +47,17 @@ sudo mv twc /usr/local/bin/
 ### Windows
 
 Download `twc-windows-x86_64.exe` from the [latest release](https://github.com/stillouyng/twenty-two-port-connection/releases/latest), rename it to `twc.exe` and place it somewhere in your PATH.
+
+> **Note:** `sshpass` is not available on Windows, so password-based profiles (`--password`) are not supported. Use key-based (`--key`) or passwordless auth instead.
+
+## Dependencies
+
+| Dependency | Required for | Install |
+|---|---|---|
+| `sshpass` | Password-based auth (`twc <name>` with `--password` profiles) | `sudo apt install sshpass` / `brew install sshpass` |
+| `ssh` | Everything | Pre-installed on Linux and macOS; on Windows use OpenSSH from Settings |
+
+`sshpass` is **not needed** if you only use key-based or passwordless profiles.
 
 ## Usage
 
@@ -86,7 +104,3 @@ git clone https://github.com/stillouyng/twenty-two-port-connection
 cd twenty-two-port-connection
 cargo build --release
 ```
-
-## Roadmap & known bugs
-
-See [ROADMAP.md](ROADMAP.md) for planned features and known issues.
