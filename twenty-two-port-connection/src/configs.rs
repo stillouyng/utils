@@ -193,23 +193,24 @@ pub fn add_config(
     };
     let mut config = load_config().unwrap_or_default();
 
-    let encrypted_password = if with_password {
-        let ssh_pass =
-            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password");
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-        Some(encrypt(&ssh_pass, &master))
+    let ssh_pass_plain = if with_password {
+        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    } else {
+        None
+    };
+    let sudo_pass_plain = if with_sudo_password {
+        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    } else {
+        None
+    };
+    let master = if with_password || with_sudo_password {
+        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
     } else {
         None
     };
 
-    let encrypted_sudo_password = if with_sudo_password {
-        let sudo_pass =
-            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password");
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-        Some(encrypt(&sudo_pass, &master))
-    } else {
-        None
-    };
+    let encrypted_password = ssh_pass_plain.map(|p| encrypt(&p, master.as_deref().unwrap()));
+    let encrypted_sudo_password = sudo_pass_plain.map(|p| encrypt(&p, master.as_deref().unwrap()));
 
     let ssh_config = SSHConfig {
         user,
@@ -286,22 +287,32 @@ pub fn edit_config(name: &str, args: EditArgs) {
         cfg.identity_file = Some(k);
     }
 
+    let ssh_pass_plain = if args.with_password {
+        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    } else {
+        None
+    };
+    let sudo_pass_plain = if args.with_sudo_password {
+        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    } else {
+        None
+    };
+    let master = if args.with_password || args.with_sudo_password {
+        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
+    } else {
+        None
+    };
+
     if args.remove_password {
         cfg.password = None;
-    } else if args.with_password {
-        let ssh_pass =
-            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password");
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-        cfg.password = Some(encrypt(&ssh_pass, &master));
+    } else if let Some(p) = ssh_pass_plain {
+        cfg.password = Some(encrypt(&p, master.as_deref().unwrap()));
     }
 
     if args.remove_sudo_password {
         cfg.sudo_password = None;
-    } else if args.with_sudo_password {
-        let sudo_pass =
-            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password");
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-        cfg.sudo_password = Some(encrypt(&sudo_pass, &master));
+    } else if let Some(p) = sudo_pass_plain {
+        cfg.sudo_password = Some(encrypt(&p, master.as_deref().unwrap()));
     }
 
     save_config(&config).expect("Failed to save config");
