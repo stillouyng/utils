@@ -591,7 +591,11 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Optio
     let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
     let envelope = ecies_encrypt(blob_json.as_bytes(), &recipient_pub);
     let envelope_json = serde_json::to_string(&envelope).expect("Serialization failed");
-    let clip_content = format!("TWC2:{}", B64.encode(envelope_json.as_bytes()));
+    // TWC3: signals a TTL-aware blob; old clients (which only accept TWC2:) will
+    // reject it with a hard error instead of silently importing and ignoring expires_at.
+    // Non-TTL blobs keep the TWC2: prefix so old clients can still import them.
+    let prefix = if expires_at.is_some() { "TWC3" } else { "TWC2" };
+    let clip_content = format!("{}:{}", prefix, B64.encode(envelope_json.as_bytes()));
 
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     clipboard
@@ -616,13 +620,19 @@ pub fn import_from_clip() {
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     let content = clipboard.get_text().expect("Failed to read clipboard");
 
-    let b64 = match content.trim().strip_prefix("TWC2:") {
-        Some(s) => s,
-        None => {
-            eprintln!("Clipboard does not contain a valid twc share blob (expected TWC2: prefix).");
-            eprintln!("Make sure the sender used: twc copy <name> --share --for <your-key>");
-            exit(1);
+    let trimmed = content.trim();
+    let b64 = if let Some(s) = trimmed.strip_prefix("TWC3:") {
+        s
+    } else if let Some(s) = trimmed.strip_prefix("TWC2:") {
+        s
+    } else {
+        eprintln!("Clipboard does not contain a valid twc share blob.");
+        if trimmed.starts_with("TWC") {
+            eprintln!("This blob uses a newer format — please update twc.");
+        } else {
+            eprintln!("Make sure the sender used: twc copy <name> --share --for-key <your-key>");
         }
+        exit(1);
     };
 
     let envelope_json_bytes = match B64.decode(b64) {
