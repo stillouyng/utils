@@ -788,20 +788,28 @@ pub fn import_from_clip() {
     println!("Imported profile '{}'.", blob.name);
 }
 
-/// Shows the user's twc public key.  Auto-generates the X25519 keypair on
-/// first use (prompts for master key to encrypt the stored private key).
+/// Shows the user's twc public key and copies it to clipboard.
+/// Auto-generates the X25519 keypair on first use (prompts for master key
+/// to encrypt the stored private key).
 pub fn show_share_key() {
-    if let Some(pubkey) = get_pubkey_string() {
-        println!("{pubkey}");
+    let pubkey = if let Some(pubkey) = get_pubkey_string() {
+        pubkey
     } else {
         println!("No identity key found — generating one now.");
         let master = rpassword::prompt_password("Master key (to protect your new identity key): ")
             .expect("Failed to read master key");
         let pubkey = get_or_create_pubkey(&master);
         println!("Your twc public key:");
-        println!("{pubkey}");
         println!();
         println!("Share this with anyone who wants to send you a profile.");
+        pubkey
+    };
+
+    println!("{pubkey}");
+
+    match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&pubkey).map(|_| cb)) {
+        Ok(_) => println!("(copied to clipboard)"),
+        Err(e) => eprintln!("Warning: could not copy to clipboard: {e}"),
     }
 }
 
