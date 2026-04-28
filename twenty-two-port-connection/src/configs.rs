@@ -58,6 +58,17 @@ fn format_duration(mut secs: u64) -> String {
     parts.join(" ")
 }
 
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn is_expired(cfg: &SSHConfig) -> bool {
+    cfg.expires_at.map_or(false, |exp| unix_now() > exp)
+}
+
 const RESERVED_NAMES: &[&str] = &[
     "add",
     "remove",
@@ -96,6 +107,16 @@ pub fn run_config(name: &str) {
     let config = load_config().unwrap_or_default();
 
     if let Some(cfg) = config.get(name) {
+        if cfg.shared && is_expired(cfg) {
+            let detail = cfg
+                .expires_at
+                .map(|exp| format!(" (expired {} ago)", format_duration(unix_now().saturating_sub(exp))))
+                .unwrap_or_default();
+            eprintln!("Shared profile '{name}' has expired{detail}.");
+            eprintln!("Contact the sender for a fresh share, or remove it with: twc remove {name}");
+            exit(1);
+        }
+
         if let Some(ref encrypted) = cfg.password {
             // Prompt for master key, decrypt SSH password, use sshpass
             let master =
@@ -218,6 +239,8 @@ pub fn add_config(
         identity_file: key,
         password: encrypted_password,
         sudo_password: encrypted_sudo_password,
+        shared: false,
+        expires_at: None,
     };
 
     config.insert(name.to_string(), ssh_config);
@@ -245,6 +268,12 @@ pub fn edit_config(name: &str, args: EditArgs) {
         eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
         return;
     };
+
+    if cfg.shared {
+        eprintln!("Cannot edit shared profile '{name}'.");
+        eprintln!("Shared profiles are read-only. Remove it and re-add manually if you need full control.");
+        return;
+    }
 
     if args.user.is_none()
         && args.host.is_none()
@@ -381,6 +410,20 @@ pub fn show_config(name: &str) {
     println!("Port:  {port}");
     println!("Auth:  {auth}");
     println!("Sudo:  {sudo}");
+    if cfg.shared {
+        let expiry = match cfg.expires_at {
+            None => "none".to_string(),
+            Some(exp) => {
+                let now = unix_now();
+                if now > exp {
+                    format!("expired {} ago", format_duration(now.saturating_sub(exp)))
+                } else {
+                    format!("in {}", format_duration(exp.saturating_sub(now)))
+                }
+            }
+        };
+        println!("Shared: yes (expires {expiry})");
+    }
 }
 
 pub fn rename_config(name: &str, new_name: &str) {
@@ -415,6 +458,12 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>, ttl: Option<&
         exit(1);
     };
 
+    if cfg.shared {
+        eprintln!("Cannot copy credentials from shared profile '{name}'.");
+        eprintln!("Shared profiles do not allow credential extraction or re-sharing.");
+        exit(1);
+    }
+
     if ttl.is_some() && !share {
         eprintln!("--ttl has no effect without --share.");
         exit(1);
@@ -422,7 +471,7 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>, ttl: Option<&
 
     if share {
         let recipient_key = for_key.unwrap_or_else(|| {
-            eprintln!("--share requires --for <PUBKEY>.");
+            eprintln!("--share requires --for-key <PUBKEY>.");
             eprintln!("The recipient can get their key with: twc share-key");
             exit(1);
         });
@@ -702,6 +751,8 @@ pub fn import_from_clip() {
         identity_file,
         password: encrypted_password,
         sudo_password: encrypted_sudo,
+        shared: true,
+        expires_at: blob.expires_at,
     };
 
     config.insert(blob.name.clone(), ssh_config);
@@ -751,7 +802,16 @@ pub fn list_configs() {
         } else {
             ""
         };
-        println!("{name} | {}@{}{port} {auth}{sudo}", cfg.user, cfg.host);
+        let shared_badge = if cfg.shared {
+            if is_expired(cfg) {
+                " [shared · expired]"
+            } else {
+                " [shared]"
+            }
+        } else {
+            ""
+        };
+        println!("{name} | {}@{}{port} {auth}{sudo}{shared_badge}", cfg.user, cfg.host);
     }
 }
 
@@ -762,6 +822,12 @@ pub fn copy_sp_config(name: &str) {
         eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
         exit(1);
     };
+
+    if cfg.shared {
+        eprintln!("Cannot copy credentials from shared profile '{name}'.");
+        eprintln!("Shared profiles do not allow credential extraction.");
+        exit(1);
+    }
 
     let Some(ref encrypted) = cfg.sudo_password else {
         eprintln!("Profile '{name}' has no sudo password stored.");

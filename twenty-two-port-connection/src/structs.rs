@@ -90,8 +90,8 @@ pub enum Command {
 
         Examples:
           twc copy myserver
-          twc copy myserver --share --for twc1:<pubkey>
-          twc copy myserver --share --for twc1:<pubkey> --ttl 24H
+          twc copy myserver --share --for-key twc1:<pubkey>
+          twc copy myserver --share --for-key twc1:<pubkey> --ttl 24H
         "
     )]
     Copy {
@@ -240,6 +240,12 @@ pub struct SSHConfig {
 
     #[serde(default)]
     pub sudo_password: Option<EncryptedSecret>,
+
+    #[serde(default)]
+    pub shared: bool,
+
+    #[serde(default)]
+    pub expires_at: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
