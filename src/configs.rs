@@ -142,42 +142,85 @@ pub fn run_config(name: &str) {
                 }
             };
 
-            let mut cmd = ProcessCommand::new("sshpass");
-            cmd.arg("-p").arg(&ssh_password);
-            cmd.arg("ssh");
-            cmd.arg(format!("{}@{}", cfg.user, cfg.host));
+            // Unix: feed the password through a pipe (-d fd) so it never
+            // appears in /proc/<pid>/cmdline.
+            // Windows: sshpass is unavailable regardless, so the -p path
+            // is kept only to produce the "not found" error message.
+            #[cfg(unix)]
+            {
+                use std::io::Write;
+                use std::os::unix::io::FromRawFd;
+                use std::os::unix::process::CommandExt;
 
-            if let Some(port) = cfg.port {
-                cmd.arg("-p").arg(format!("{port}"));
+                let mut pipe_fds = [0i32; 2];
+                if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+                    eprintln!("Failed to create password pipe.");
+                    exit(1);
+                }
+                let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+
+                // Write password to write end, then close it so sshpass sees EOF.
+                {
+                    let mut w = unsafe { std::fs::File::from_raw_fd(write_fd) };
+                    w.write_all(ssh_password.as_bytes())
+                        .expect("Failed to write password to pipe");
+                }
+
+                let mut cmd = ProcessCommand::new("sshpass");
+                cmd.arg("-d").arg(read_fd.to_string());
+                cmd.arg("ssh");
+                cmd.arg(format!("{}@{}", cfg.user, cfg.host));
+                if let Some(port) = cfg.port {
+                    cmd.arg("-p").arg(format!("{port}"));
+                }
+
+                // Clear CLOEXEC on read_fd in the child so sshpass inherits it.
+                unsafe {
+                    cmd.pre_exec(move || {
+                        let flags = libc::fcntl(read_fd, libc::F_GETFD, 0);
+                        if flags == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        if libc::fcntl(read_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+
+                let mut child = match cmd
+                    .stdin(Stdio::inherit())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        unsafe { libc::close(read_fd) };
+                        eprintln!("Error: 'sshpass' not found.");
+                        eprintln!(
+                            "Install it with your package manager, e.g.: sudo apt install sshpass"
+                        );
+                        exit(1);
+                    }
+                    Err(e) => {
+                        unsafe { libc::close(read_fd) };
+                        eprintln!("Failed to start sshpass: {e}");
+                        exit(1);
+                    }
+                };
+
+                unsafe { libc::close(read_fd) };
+                let status = child.wait().expect("sshpass failed");
+                exit(status.code().unwrap_or(1));
             }
 
-            let mut child = match cmd
-                .stdin(Stdio::inherit())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
+            #[cfg(not(unix))]
             {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    eprintln!("Error: 'sshpass' not found.");
-                    #[cfg(target_os = "windows")]
-                    eprintln!(
-                        "sshpass is not available on Windows. Use key-based auth (--key) instead."
-                    );
-                    #[cfg(not(target_os = "windows"))]
-                    eprintln!(
-                        "Install it with your package manager, e.g.: sudo apt install sshpass"
-                    );
-                    exit(1);
-                }
-                Err(e) => {
-                    eprintln!("Failed to start sshpass: {e}");
-                    exit(1);
-                }
-            };
-
-            let status = child.wait().expect("sshpass failed");
-            exit(status.code().unwrap_or(1));
+                eprintln!("Error: password-based auth is not supported on Windows.");
+                eprintln!("Use key-based auth (--key) instead.");
+                exit(1);
+            }
         } else {
             // Key-based or passwordless login
             let mut cmd = ProcessCommand::new("ssh");

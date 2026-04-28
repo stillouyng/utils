@@ -17,3 +17,4 @@ base64 = "0.22"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 sha2 = "0.10"
 hkdf = "0.12"
+libc = "0.2"
