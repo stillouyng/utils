@@ -66,7 +66,7 @@ fn unix_now() -> u64 {
 }
 
 fn is_expired(cfg: &SSHConfig) -> bool {
-    cfg.expires_at.map_or(false, |exp| unix_now() > exp)
+    cfg.expires_at.is_some_and(|exp| unix_now() > exp)
 }
 
 const RESERVED_NAMES: &[&str] = &[
@@ -110,7 +110,12 @@ pub fn run_config(name: &str) {
         if cfg.shared && is_expired(cfg) {
             let detail = cfg
                 .expires_at
-                .map(|exp| format!(" (expired {} ago)", format_duration(unix_now().saturating_sub(exp))))
+                .map(|exp| {
+                    format!(
+                        " (expired {} ago)",
+                        format_duration(unix_now().saturating_sub(exp))
+                    )
+                })
                 .unwrap_or_default();
             eprintln!("Shared profile '{name}' has expired{detail}.");
             eprintln!("Contact the sender for a fresh share, or remove it with: twc remove {name}");
@@ -271,7 +276,9 @@ pub fn edit_config(name: &str, args: EditArgs) {
 
     if cfg.shared {
         eprintln!("Cannot edit shared profile '{name}'.");
-        eprintln!("Shared profiles are read-only. Remove it and re-add manually if you need full control.");
+        eprintln!(
+            "Shared profiles are read-only. Remove it and re-add manually if you need full control."
+        );
         return;
     }
 
@@ -821,7 +828,10 @@ pub fn list_configs() {
         } else {
             ""
         };
-        println!("{name} | {}@{}{port} {auth}{sudo}{shared_badge}", cfg.user, cfg.host);
+        println!(
+            "{name} | {}@{}{port} {auth}{sudo}{shared_badge}",
+            cfg.user, cfg.host
+        );
     }
 }
 
