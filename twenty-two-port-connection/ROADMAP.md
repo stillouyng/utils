@@ -10,12 +10,18 @@
 - [ ] **SCP** - handle scp w/out inputting the password: `twc scp <name>`.
 ## Known bugs
 
-- [ ] **`twc share-key` pubkey showing logic**: The key should be also copied into the clipboard as a default behavior.
+    NONE!
 ## Future (post-v1.0.0)
 
 - [ ] **`twc-handler` — server-side TTL and revocation**: A companion daemon (PAM module or `AuthorizedKeysCommand` hook) running on the target SSH server. Instead of sharing raw credentials, `twc copy --share` would issue a time-limited twc token; the server-side handler validates the token against a revocation list before allowing the connection. This shifts TTL enforcement from the client (advisory) to the server (hard), making expiry cryptographically unavoidable even if the recipient holds the decrypted credential. Requires a daemon installed on every target server — a fundamentally different deployment model from the current zero-server-dependency design.
 
 ## Released
+
+<details><summary><b>Share-key to the clipboard</b></summary>
+
+The key is being copied into the clipboard as a default behavior now.
+
+</details>
 
 <details>
 <summary><b>Deduplicate master key prompt</b></summary>
