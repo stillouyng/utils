@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio, exit};
+use zeroize::Zeroizing;
 
 /// Parses a TTL string like `"30M"`, `"2H"`, `"7d"` into seconds.
 /// Units: `s` seconds, `M` minutes, `H` hours, `d` days, `m` months (30d), `y` years (365d).
@@ -131,16 +132,19 @@ pub fn run_config(name: &str) {
 
         if let Some(ref encrypted) = cfg.password {
             // Prompt for master key, decrypt SSH password, use sshpass
-            let master =
-                rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-            let ssh_password = match decrypt(encrypted, &master) {
+            let master = Zeroizing::new(
+                rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+            );
+            // Used in the #[cfg(unix)] block below via the pipe.
+            // On non-unix the code exits immediately before reaching it.
+            #[cfg_attr(not(unix), allow(unused_variables))]
+            let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
                 Some(p) => p,
                 None => {
                     eprintln!("Wrong master key or corrupted data.");
                     exit(1);
                 }
-            };
+            });
 
             // Unix: feed the password through a pipe (-d fd) so it never
             // appears in /proc/<pid>/cmdline.
@@ -269,18 +273,24 @@ pub fn add_config(
     };
     let mut config = load_config().unwrap_or_default();
 
-    let ssh_pass_plain = if with_password {
-        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    let ssh_pass_plain: Option<Zeroizing<String>> = if with_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"),
+        ))
     } else {
         None
     };
-    let sudo_pass_plain = if with_sudo_password {
-        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    let sudo_pass_plain: Option<Zeroizing<String>> = if with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"),
+        ))
     } else {
         None
     };
-    let master = if with_password || with_sudo_password {
-        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
+    let master: Option<Zeroizing<String>> = if with_password || with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        ))
     } else {
         None
     };
@@ -373,18 +383,24 @@ pub fn edit_config(name: &str, args: EditArgs) {
         cfg.identity_file = Some(k);
     }
 
-    let ssh_pass_plain = if args.with_password {
-        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    let ssh_pass_plain: Option<Zeroizing<String>> = if args.with_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"),
+        ))
     } else {
         None
     };
-    let sudo_pass_plain = if args.with_sudo_password {
-        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    let sudo_pass_plain: Option<Zeroizing<String>> = if args.with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"),
+        ))
     } else {
         None
     };
-    let master = if args.with_password || args.with_sudo_password {
-        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
+    let master: Option<Zeroizing<String>> = if args.with_password || args.with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        ))
     } else {
         None
     };
@@ -550,17 +566,24 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>, ttl: Option<&
     let port = cfg.port.unwrap_or(22);
 
     if let Some(ref encrypted) = cfg.password {
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-        let ssh_password = match decrypt(encrypted, &master) {
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        );
+        let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
             Some(p) => p,
             None => {
                 eprintln!("Wrong master key or corrupted data.");
                 exit(1);
             }
-        };
+        });
 
-        let content = format!("{}@{}:{} {}", cfg.user, cfg.host, port, ssh_password);
+        let content = format!(
+            "{}@{}:{} {}",
+            cfg.user,
+            cfg.host,
+            port,
+            ssh_password.as_str()
+        );
 
         let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
         clipboard
@@ -593,8 +616,9 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Optio
     let needs_master = cfg.password.is_some() || cfg.sudo_password.is_some();
 
     let (password_plain, sudo_password_plain) = if needs_master {
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        );
         let pw = cfg.password.as_ref().map(|enc| {
             decrypt(enc, &master).unwrap_or_else(|| {
                 eprintln!("Wrong master key or corrupted data.");
@@ -729,7 +753,9 @@ pub fn import_from_clip() {
 
     // Master key serves triple duty: decrypt identity private key, ECIES-decrypt
     // the blob, and re-encrypt the imported secrets under the recipient's key.
-    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+    let master = Zeroizing::new(
+        rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+    );
 
     let priv_key = match load_private_key(&master) {
         Some(k) => k,
@@ -846,8 +872,10 @@ pub fn show_share_key() {
         pubkey
     } else {
         println!("No identity key found — generating one now.");
-        let master = rpassword::prompt_password("Master key (to protect your new identity key): ")
-            .expect("Failed to read master key");
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key (to protect your new identity key): ")
+                .expect("Failed to read master key"),
+        );
         let pubkey = get_or_create_pubkey(&master);
         println!("Your twc public key:");
         println!();
@@ -924,19 +952,20 @@ pub fn copy_sp_config(name: &str) {
         exit(1);
     };
 
-    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-    let sudo_password = match decrypt(encrypted, &master) {
+    let master = Zeroizing::new(
+        rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+    );
+    let sudo_password = Zeroizing::new(match decrypt(encrypted, &master) {
         Some(p) => p,
         None => {
             eprintln!("Wrong master key or corrupted data.");
             exit(1);
         }
-    };
+    });
 
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     clipboard
-        .set_text(&sudo_password)
+        .set_text(sudo_password.as_str())
         .expect("Failed to copy to clipboard");
 
     println!("Sudo password for '{name}' copied to clipboard.");
