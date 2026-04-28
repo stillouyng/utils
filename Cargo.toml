@@ -1,5 +1,5 @@
 [package]
-name = "twenty-two-port-connection"
+name = "twc"
 version = "0.6.0"
 edition = "2024"
 
