@@ -1001,111 +1001,107 @@ pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
         (remote, dst.to_string())
     };
 
+    #[cfg(not(unix))]
     if cfg.password.is_some() {
-        #[cfg(not(unix))]
-        {
-            eprintln!("Error: password-based auth is not supported on Windows.");
-            eprintln!("Use key-based auth (--key) instead.");
-            exit(1);
-        }
+        eprintln!("Error: password-based auth is not supported on Windows.");
+        eprintln!("Use key-based auth (--key) instead.");
+        exit(1);
+    }
 
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::io::FromRawFd;
-            use std::os::unix::process::CommandExt;
+    #[cfg(unix)]
+    if let Some(ref encrypted) = cfg.password {
+        use std::io::Write;
+        use std::os::unix::io::FromRawFd;
+        use std::os::unix::process::CommandExt;
 
-            let encrypted = cfg.password.as_ref().unwrap();
-            let master = Zeroizing::new(
-                rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
-            );
-            let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
-                Some(p) => p,
-                None => {
-                    eprintln!("Wrong master key or corrupted data.");
-                    exit(1);
-                }
-            });
-
-            let mut pipe_fds = [0i32; 2];
-            if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
-                eprintln!("Failed to create password pipe.");
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        );
+        let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
+            Some(p) => p,
+            None => {
+                eprintln!("Wrong master key or corrupted data.");
                 exit(1);
             }
-            let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+        });
 
-            {
-                let mut w = unsafe { std::fs::File::from_raw_fd(write_fd) };
-                w.write_all(ssh_password.as_bytes())
-                    .expect("Failed to write password to pipe");
-            }
-
-            let mut cmd = ProcessCommand::new("sshpass");
-            cmd.arg("-d").arg(read_fd.to_string());
-            cmd.arg("scp");
-            if let Some(port) = cfg.port {
-                // scp uses -P (uppercase), unlike ssh's -p
-                cmd.arg("-P").arg(format!("{port}"));
-            }
-            cmd.arg(&scp_src).arg(&scp_dst);
-
-            unsafe {
-                cmd.pre_exec(move || {
-                    let flags = libc::fcntl(read_fd, libc::F_GETFD, 0);
-                    if flags == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    if libc::fcntl(read_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-
-            let mut child = match cmd
-                .stdin(Stdio::inherit())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    unsafe { libc::close(read_fd) };
-                    eprintln!("Error: 'sshpass' not found.");
-                    eprintln!(
-                        "Install it with your package manager, e.g.: sudo apt install sshpass"
-                    );
-                    exit(1);
-                }
-                Err(e) => {
-                    unsafe { libc::close(read_fd) };
-                    eprintln!("Failed to start sshpass: {e}");
-                    exit(1);
-                }
-            };
-
-            unsafe { libc::close(read_fd) };
-            let status = child.wait().expect("sshpass failed");
-            exit(status.code().unwrap_or(1));
+        let mut pipe_fds = [0i32; 2];
+        if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+            eprintln!("Failed to create password pipe.");
+            exit(1);
         }
-    } else {
-        let mut cmd = ProcessCommand::new("scp");
+        let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+
+        {
+            let mut w = unsafe { std::fs::File::from_raw_fd(write_fd) };
+            w.write_all(ssh_password.as_bytes())
+                .expect("Failed to write password to pipe");
+        }
+
+        let mut cmd = ProcessCommand::new("sshpass");
+        cmd.arg("-d").arg(read_fd.to_string());
+        cmd.arg("scp");
         if let Some(port) = cfg.port {
             cmd.arg("-P").arg(format!("{port}"));
         }
-        if let Some(ref key) = cfg.identity_file {
-            cmd.arg("-i").arg(key);
-        }
         cmd.arg(&scp_src).arg(&scp_dst);
 
-        let mut child = cmd
+        unsafe {
+            cmd.pre_exec(move || {
+                let flags = libc::fcntl(read_fd, libc::F_GETFD, 0);
+                if flags == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::fcntl(read_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let mut child = match cmd
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .spawn()
-            .expect("Failed to start scp");
+        {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                unsafe { libc::close(read_fd) };
+                eprintln!("Error: 'sshpass' not found.");
+                eprintln!(
+                    "Install it with your package manager, e.g.: sudo apt install sshpass"
+                );
+                exit(1);
+            }
+            Err(e) => {
+                unsafe { libc::close(read_fd) };
+                eprintln!("Failed to start sshpass: {e}");
+                exit(1);
+            }
+        };
 
-        let status = child.wait().expect("scp failed");
+        unsafe { libc::close(read_fd) };
+        let status = child.wait().expect("sshpass failed");
         exit(status.code().unwrap_or(1));
     }
+
+    let mut cmd = ProcessCommand::new("scp");
+    if let Some(port) = cfg.port {
+        cmd.arg("-P").arg(format!("{port}"));
+    }
+    if let Some(ref key) = cfg.identity_file {
+        cmd.arg("-i").arg(key);
+    }
+    cmd.arg(&scp_src).arg(&scp_dst);
+
+    let mut child = cmd
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("Failed to start scp");
+
+    let status = child.wait().expect("scp failed");
+    exit(status.code().unwrap_or(1));
 }
