@@ -46,7 +46,7 @@ jobs:
         run: |
           BIN=target/${{ matrix.target }}/release/twc
           [[ "${{ matrix.os }}" == "windows-latest" ]] && BIN="${BIN}.exe"
-          cp "$BIN" ../${{ matrix.artifact }}
+          cp "$BIN" ${{ matrix.artifact }}
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
