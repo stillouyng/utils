@@ -183,6 +183,28 @@ pub enum Command {
         "
     )]
     CopySp { name: String },
+    #[clap(
+        name = "scp",
+        about = "Copy files to/from a server using a saved profile",
+        long_about = "Copy files to/from a server using a saved profile.
+
+        Default (server → local):
+          twc scp myserver /remote/path/file.txt ./local/dir/
+
+        Upload (local → server), add --from-local:
+          twc scp myserver ./local/file.txt /remote/path/ --from-local
+
+        Note: the first path is the source, the second is the destination.
+        Without --from-local, source is on the server; with it, source is local.
+        "
+    )]
+    Scp {
+        name: String,
+        src: String,
+        dst: String,
+        #[clap(long, help = "Copy from local to server (default: server to local)")]
+        from_local: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
