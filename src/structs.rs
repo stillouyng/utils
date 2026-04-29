@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -283,7 +284,7 @@ pub struct EciesEnvelope {
 /// `expires_at` is a Unix timestamp (seconds).  Because it lives in the
 /// authenticated plaintext, AES-256-GCM makes it tamper-proof — nobody
 /// can extend the TTL without the recipient's private key.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ZeroizeOnDrop)]
 pub struct ShareBlob {
     pub name: String,
     pub user: String,

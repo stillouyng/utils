@@ -680,7 +680,7 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Optio
         expires_at,
     };
 
-    let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
+    let blob_json = Zeroizing::new(serde_json::to_string(&blob).expect("Serialization failed"));
     let envelope = ecies_encrypt(blob_json.as_bytes(), &recipient_pub);
     let envelope_json = serde_json::to_string(&envelope).expect("Serialization failed");
     // TWC3: signals a TTL-aware blob; old clients (which only accept TWC2:) will
@@ -773,15 +773,15 @@ pub fn import_from_clip() {
         }
     };
 
-    let blob_json = match String::from_utf8(blob_json_bytes) {
+    let blob_json = Zeroizing::new(match String::from_utf8(blob_json_bytes) {
         Ok(s) => s,
         Err(_) => {
             eprintln!("Corrupted blob content.");
             exit(1);
         }
-    };
+    });
 
-    let blob: ShareBlob = match serde_json::from_str(&blob_json) {
+    let mut blob: ShareBlob = match serde_json::from_str(&*blob_json) {
         Ok(b) => b,
         Err(_) => {
             eprintln!("Failed to parse share blob.");
@@ -822,10 +822,12 @@ pub fn import_from_clip() {
     }
 
     // Re-encrypt plaintext secrets under the recipient's own master key.
-    let encrypted_password = blob.password.map(|pw| encrypt(&pw, &master));
-    let encrypted_sudo = blob.sudo_password.map(|pw| encrypt(&pw, &master));
+    // Use take() so the plaintext is moved out and the blob fields are cleared
+    // before ZeroizeOnDrop runs on blob at end of scope.
+    let encrypted_password = blob.password.take().map(|pw| encrypt(&pw, &master));
+    let encrypted_sudo = blob.sudo_password.take().map(|pw| encrypt(&pw, &master));
 
-    let identity_file = if let Some(key_bytes) = blob.key_bytes {
+    let identity_file = if let Some(key_bytes) = blob.key_bytes.take() {
         let ssh_dir = dirs::home_dir()
             .expect("Cannot find home directory")
             .join(".ssh");
@@ -849,8 +851,8 @@ pub fn import_from_clip() {
     };
 
     let ssh_config = SSHConfig {
-        user: blob.user,
-        host: blob.host,
+        user: std::mem::take(&mut blob.user),
+        host: std::mem::take(&mut blob.host),
         port: blob.port,
         identity_file,
         password: encrypted_password,
@@ -859,9 +861,10 @@ pub fn import_from_clip() {
         expires_at: blob.expires_at,
     };
 
-    config.insert(blob.name.clone(), ssh_config);
+    let name = std::mem::take(&mut blob.name);
+    config.insert(name.clone(), ssh_config);
     save_config(&config).expect("Failed to save config");
-    println!("Imported profile '{}'.", blob.name);
+    println!("Imported profile '{name}'.");
 }
 
 /// Shows the user's twc public key and copies it to clipboard.
