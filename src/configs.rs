@@ -781,7 +781,7 @@ pub fn import_from_clip() {
         }
     });
 
-    let mut blob: ShareBlob = match serde_json::from_str(&*blob_json) {
+    let mut blob: ShareBlob = match serde_json::from_str(&blob_json) {
         Ok(b) => b,
         Err(_) => {
             eprintln!("Failed to parse share blob.");
