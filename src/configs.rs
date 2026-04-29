@@ -1069,9 +1069,7 @@ pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 unsafe { libc::close(read_fd) };
                 eprintln!("Error: 'sshpass' not found.");
-                eprintln!(
-                    "Install it with your package manager, e.g.: sudo apt install sshpass"
-                );
+                eprintln!("Install it with your package manager, e.g.: sudo apt install sshpass");
                 exit(1);
             }
             Err(e) => {
