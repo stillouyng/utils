@@ -5,9 +5,6 @@ on:
     tags:
       - 'twc-v*'
 
-defaults:
-  run:
-    working-directory: twenty-two-port-connection
 
 jobs:
   build:
@@ -47,7 +44,7 @@ jobs:
       - name: Stage binary
         shell: bash
         run: |
-          BIN=target/${{ matrix.target }}/release/twenty-two-port-connection
+          BIN=target/${{ matrix.target }}/release/twc
           [[ "${{ matrix.os }}" == "windows-latest" ]] && BIN="${BIN}.exe"
           cp "$BIN" ../${{ matrix.artifact }}
 
