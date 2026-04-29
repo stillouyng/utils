@@ -80,6 +80,7 @@ const RESERVED_NAMES: &[&str] = &[
     "copy",
     "copy-sp",
     "share-key",
+    "scp",
     "help",
 ];
 
