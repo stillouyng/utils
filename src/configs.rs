@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio, exit};
+use zeroize::Zeroizing;
 
 /// Parses a TTL string like `"30M"`, `"2H"`, `"7d"` into seconds.
 /// Units: `s` seconds, `M` minutes, `H` hours, `d` days, `m` months (30d), `y` years (365d).
@@ -79,6 +80,7 @@ const RESERVED_NAMES: &[&str] = &[
     "copy",
     "copy-sp",
     "share-key",
+    "scp",
     "help",
 ];
 
@@ -99,7 +101,14 @@ pub fn save_config(config: &ConfigMap) -> Result<(), Box<dyn std::error::Error>>
         create_dir_all(dir)?;
     }
     let data = serde_json::to_string_pretty(config)?;
-    std::fs::write(path, data)?;
+    std::fs::write(&path, data)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+
     Ok(())
 }
 
@@ -124,53 +133,99 @@ pub fn run_config(name: &str) {
 
         if let Some(ref encrypted) = cfg.password {
             // Prompt for master key, decrypt SSH password, use sshpass
-            let master =
-                rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-            let ssh_password = match decrypt(encrypted, &master) {
+            let master = Zeroizing::new(
+                rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+            );
+            // Used in the #[cfg(unix)] block below via the pipe.
+            // On non-unix the code exits immediately before reaching it.
+            #[cfg_attr(not(unix), allow(unused_variables))]
+            let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
                 Some(p) => p,
                 None => {
                     eprintln!("Wrong master key or corrupted data.");
                     exit(1);
                 }
-            };
+            });
 
-            let mut cmd = ProcessCommand::new("sshpass");
-            cmd.arg("-p").arg(&ssh_password);
-            cmd.arg("ssh");
-            cmd.arg(format!("{}@{}", cfg.user, cfg.host));
+            // Unix: feed the password through a pipe (-d fd) so it never
+            // appears in /proc/<pid>/cmdline.
+            // Windows: sshpass is unavailable regardless, so the -p path
+            // is kept only to produce the "not found" error message.
+            #[cfg(unix)]
+            {
+                use std::io::Write;
+                use std::os::unix::io::FromRawFd;
+                use std::os::unix::process::CommandExt;
 
-            if let Some(port) = cfg.port {
-                cmd.arg("-p").arg(format!("{port}"));
+                let mut pipe_fds = [0i32; 2];
+                if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+                    eprintln!("Failed to create password pipe.");
+                    exit(1);
+                }
+                let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+
+                // Write password to write end, then close it so sshpass sees EOF.
+                {
+                    let mut w = unsafe { std::fs::File::from_raw_fd(write_fd) };
+                    w.write_all(ssh_password.as_bytes())
+                        .expect("Failed to write password to pipe");
+                }
+
+                let mut cmd = ProcessCommand::new("sshpass");
+                cmd.arg("-d").arg(read_fd.to_string());
+                cmd.arg("ssh");
+                cmd.arg(format!("{}@{}", cfg.user, cfg.host));
+                if let Some(port) = cfg.port {
+                    cmd.arg("-p").arg(format!("{port}"));
+                }
+
+                // Clear CLOEXEC on read_fd in the child so sshpass inherits it.
+                unsafe {
+                    cmd.pre_exec(move || {
+                        let flags = libc::fcntl(read_fd, libc::F_GETFD, 0);
+                        if flags == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        if libc::fcntl(read_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                            return Err(std::io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+
+                let mut child = match cmd
+                    .stdin(Stdio::inherit())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        unsafe { libc::close(read_fd) };
+                        eprintln!("Error: 'sshpass' not found.");
+                        eprintln!(
+                            "Install it with your package manager, e.g.: sudo apt install sshpass"
+                        );
+                        exit(1);
+                    }
+                    Err(e) => {
+                        unsafe { libc::close(read_fd) };
+                        eprintln!("Failed to start sshpass: {e}");
+                        exit(1);
+                    }
+                };
+
+                unsafe { libc::close(read_fd) };
+                let status = child.wait().expect("sshpass failed");
+                exit(status.code().unwrap_or(1));
             }
 
-            let mut child = match cmd
-                .stdin(Stdio::inherit())
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .spawn()
+            #[cfg(not(unix))]
             {
-                Ok(c) => c,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    eprintln!("Error: 'sshpass' not found.");
-                    #[cfg(target_os = "windows")]
-                    eprintln!(
-                        "sshpass is not available on Windows. Use key-based auth (--key) instead."
-                    );
-                    #[cfg(not(target_os = "windows"))]
-                    eprintln!(
-                        "Install it with your package manager, e.g.: sudo apt install sshpass"
-                    );
-                    exit(1);
-                }
-                Err(e) => {
-                    eprintln!("Failed to start sshpass: {e}");
-                    exit(1);
-                }
-            };
-
-            let status = child.wait().expect("sshpass failed");
-            exit(status.code().unwrap_or(1));
+                eprintln!("Error: password-based auth is not supported on Windows.");
+                eprintln!("Use key-based auth (--key) instead.");
+                exit(1);
+            }
         } else {
             // Key-based or passwordless login
             let mut cmd = ProcessCommand::new("ssh");
@@ -219,18 +274,24 @@ pub fn add_config(
     };
     let mut config = load_config().unwrap_or_default();
 
-    let ssh_pass_plain = if with_password {
-        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    let ssh_pass_plain: Option<Zeroizing<String>> = if with_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"),
+        ))
     } else {
         None
     };
-    let sudo_pass_plain = if with_sudo_password {
-        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    let sudo_pass_plain: Option<Zeroizing<String>> = if with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"),
+        ))
     } else {
         None
     };
-    let master = if with_password || with_sudo_password {
-        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
+    let master: Option<Zeroizing<String>> = if with_password || with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        ))
     } else {
         None
     };
@@ -323,18 +384,24 @@ pub fn edit_config(name: &str, args: EditArgs) {
         cfg.identity_file = Some(k);
     }
 
-    let ssh_pass_plain = if args.with_password {
-        Some(rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"))
+    let ssh_pass_plain: Option<Zeroizing<String>> = if args.with_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("SSH password: ").expect("Failed to read SSH password"),
+        ))
     } else {
         None
     };
-    let sudo_pass_plain = if args.with_sudo_password {
-        Some(rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"))
+    let sudo_pass_plain: Option<Zeroizing<String>> = if args.with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Sudo password: ").expect("Failed to read sudo password"),
+        ))
     } else {
         None
     };
-    let master = if args.with_password || args.with_sudo_password {
-        Some(rpassword::prompt_password("Master key: ").expect("Failed to read master key"))
+    let master: Option<Zeroizing<String>> = if args.with_password || args.with_sudo_password {
+        Some(Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        ))
     } else {
         None
     };
@@ -500,17 +567,24 @@ pub fn copy_config(name: &str, share: bool, for_key: Option<&str>, ttl: Option<&
     let port = cfg.port.unwrap_or(22);
 
     if let Some(ref encrypted) = cfg.password {
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-        let ssh_password = match decrypt(encrypted, &master) {
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        );
+        let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
             Some(p) => p,
             None => {
                 eprintln!("Wrong master key or corrupted data.");
                 exit(1);
             }
-        };
+        });
 
-        let content = format!("{}@{}:{} {}", cfg.user, cfg.host, port, ssh_password);
+        let content = format!(
+            "{}@{}:{} {}",
+            cfg.user,
+            cfg.host,
+            port,
+            ssh_password.as_str()
+        );
 
         let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
         clipboard
@@ -543,8 +617,9 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Optio
     let needs_master = cfg.password.is_some() || cfg.sudo_password.is_some();
 
     let (password_plain, sudo_password_plain) = if needs_master {
-        let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+        );
         let pw = cfg.password.as_ref().map(|enc| {
             decrypt(enc, &master).unwrap_or_else(|| {
                 eprintln!("Wrong master key or corrupted data.");
@@ -606,7 +681,7 @@ fn share_config(name: &str, cfg: &SSHConfig, recipient_key_str: &str, ttl: Optio
         expires_at,
     };
 
-    let blob_json = serde_json::to_string(&blob).expect("Serialization failed");
+    let blob_json = Zeroizing::new(serde_json::to_string(&blob).expect("Serialization failed"));
     let envelope = ecies_encrypt(blob_json.as_bytes(), &recipient_pub);
     let envelope_json = serde_json::to_string(&envelope).expect("Serialization failed");
     // TWC3: signals a TTL-aware blob; old clients (which only accept TWC2:) will
@@ -679,7 +754,9 @@ pub fn import_from_clip() {
 
     // Master key serves triple duty: decrypt identity private key, ECIES-decrypt
     // the blob, and re-encrypt the imported secrets under the recipient's key.
-    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
+    let master = Zeroizing::new(
+        rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+    );
 
     let priv_key = match load_private_key(&master) {
         Some(k) => k,
@@ -697,15 +774,15 @@ pub fn import_from_clip() {
         }
     };
 
-    let blob_json = match String::from_utf8(blob_json_bytes) {
+    let blob_json = Zeroizing::new(match String::from_utf8(blob_json_bytes) {
         Ok(s) => s,
         Err(_) => {
             eprintln!("Corrupted blob content.");
             exit(1);
         }
-    };
+    });
 
-    let blob: ShareBlob = match serde_json::from_str(&blob_json) {
+    let mut blob: ShareBlob = match serde_json::from_str(&blob_json) {
         Ok(b) => b,
         Err(_) => {
             eprintln!("Failed to parse share blob.");
@@ -746,10 +823,12 @@ pub fn import_from_clip() {
     }
 
     // Re-encrypt plaintext secrets under the recipient's own master key.
-    let encrypted_password = blob.password.map(|pw| encrypt(&pw, &master));
-    let encrypted_sudo = blob.sudo_password.map(|pw| encrypt(&pw, &master));
+    // Use take() so the plaintext is moved out and the blob fields are cleared
+    // before ZeroizeOnDrop runs on blob at end of scope.
+    let encrypted_password = blob.password.take().map(|pw| encrypt(&pw, &master));
+    let encrypted_sudo = blob.sudo_password.take().map(|pw| encrypt(&pw, &master));
 
-    let identity_file = if let Some(key_bytes) = blob.key_bytes {
+    let identity_file = if let Some(key_bytes) = blob.key_bytes.take() {
         let ssh_dir = dirs::home_dir()
             .expect("Cannot find home directory")
             .join(".ssh");
@@ -773,8 +852,8 @@ pub fn import_from_clip() {
     };
 
     let ssh_config = SSHConfig {
-        user: blob.user,
-        host: blob.host,
+        user: std::mem::take(&mut blob.user),
+        host: std::mem::take(&mut blob.host),
         port: blob.port,
         identity_file,
         password: encrypted_password,
@@ -783,9 +862,10 @@ pub fn import_from_clip() {
         expires_at: blob.expires_at,
     };
 
-    config.insert(blob.name.clone(), ssh_config);
+    let name = std::mem::take(&mut blob.name);
+    config.insert(name.clone(), ssh_config);
     save_config(&config).expect("Failed to save config");
-    println!("Imported profile '{}'.", blob.name);
+    println!("Imported profile '{name}'.");
 }
 
 /// Shows the user's twc public key and copies it to clipboard.
@@ -796,8 +876,10 @@ pub fn show_share_key() {
         pubkey
     } else {
         println!("No identity key found — generating one now.");
-        let master = rpassword::prompt_password("Master key (to protect your new identity key): ")
-            .expect("Failed to read master key");
+        let master = Zeroizing::new(
+            rpassword::prompt_password("Master key (to protect your new identity key): ")
+                .expect("Failed to read master key"),
+        );
         let pubkey = get_or_create_pubkey(&master);
         println!("Your twc public key:");
         println!();
@@ -874,20 +956,156 @@ pub fn copy_sp_config(name: &str) {
         exit(1);
     };
 
-    let master = rpassword::prompt_password("Master key: ").expect("Failed to read master key");
-
-    let sudo_password = match decrypt(encrypted, &master) {
+    let master = Zeroizing::new(
+        rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+    );
+    let sudo_password = Zeroizing::new(match decrypt(encrypted, &master) {
         Some(p) => p,
         None => {
             eprintln!("Wrong master key or corrupted data.");
             exit(1);
         }
-    };
+    });
 
     let mut clipboard = arboard::Clipboard::new().expect("Failed to access clipboard");
     clipboard
-        .set_text(&sudo_password)
+        .set_text(sudo_password.as_str())
         .expect("Failed to copy to clipboard");
 
     println!("Sudo password for '{name}' copied to clipboard.");
+}
+
+pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
+    let config = load_config().unwrap_or_default();
+
+    let Some(cfg) = config.get(name) else {
+        eprintln!("No profile named '{name}' found. Run 'twc list' to see available profiles.");
+        exit(1);
+    };
+
+    if cfg.shared && is_expired(cfg) {
+        eprintln!("Shared profile '{name}' has expired.");
+        eprintln!("Contact the sender for a fresh share, or remove it with: twc remove {name}");
+        exit(1);
+    }
+
+    let remote = format!("{}@{}:{}", cfg.user, cfg.host, src);
+    // When from_local: scp <local_src> <user@host:dst>
+    // Default:         scp <user@host:src> <local_dst>
+    let (scp_src, scp_dst) = if from_local {
+        (
+            src.to_string(),
+            format!("{}@{}:{}", cfg.user, cfg.host, dst),
+        )
+    } else {
+        (remote, dst.to_string())
+    };
+
+    if cfg.password.is_some() {
+        #[cfg(not(unix))]
+        {
+            eprintln!("Error: password-based auth is not supported on Windows.");
+            eprintln!("Use key-based auth (--key) instead.");
+            exit(1);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::io::FromRawFd;
+            use std::os::unix::process::CommandExt;
+
+            let encrypted = cfg.password.as_ref().unwrap();
+            let master = Zeroizing::new(
+                rpassword::prompt_password("Master key: ").expect("Failed to read master key"),
+            );
+            let ssh_password = Zeroizing::new(match decrypt(encrypted, &master) {
+                Some(p) => p,
+                None => {
+                    eprintln!("Wrong master key or corrupted data.");
+                    exit(1);
+                }
+            });
+
+            let mut pipe_fds = [0i32; 2];
+            if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
+                eprintln!("Failed to create password pipe.");
+                exit(1);
+            }
+            let (read_fd, write_fd) = (pipe_fds[0], pipe_fds[1]);
+
+            {
+                let mut w = unsafe { std::fs::File::from_raw_fd(write_fd) };
+                w.write_all(ssh_password.as_bytes())
+                    .expect("Failed to write password to pipe");
+            }
+
+            let mut cmd = ProcessCommand::new("sshpass");
+            cmd.arg("-d").arg(read_fd.to_string());
+            cmd.arg("scp");
+            if let Some(port) = cfg.port {
+                // scp uses -P (uppercase), unlike ssh's -p
+                cmd.arg("-P").arg(format!("{port}"));
+            }
+            cmd.arg(&scp_src).arg(&scp_dst);
+
+            unsafe {
+                cmd.pre_exec(move || {
+                    let flags = libc::fcntl(read_fd, libc::F_GETFD, 0);
+                    if flags == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    if libc::fcntl(read_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+
+            let mut child = match cmd
+                .stdin(Stdio::inherit())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    unsafe { libc::close(read_fd) };
+                    eprintln!("Error: 'sshpass' not found.");
+                    eprintln!(
+                        "Install it with your package manager, e.g.: sudo apt install sshpass"
+                    );
+                    exit(1);
+                }
+                Err(e) => {
+                    unsafe { libc::close(read_fd) };
+                    eprintln!("Failed to start sshpass: {e}");
+                    exit(1);
+                }
+            };
+
+            unsafe { libc::close(read_fd) };
+            let status = child.wait().expect("sshpass failed");
+            exit(status.code().unwrap_or(1));
+        }
+    } else {
+        let mut cmd = ProcessCommand::new("scp");
+        if let Some(port) = cfg.port {
+            cmd.arg("-P").arg(format!("{port}"));
+        }
+        if let Some(ref key) = cfg.identity_file {
+            cmd.arg("-i").arg(key);
+        }
+        cmd.arg(&scp_src).arg(&scp_dst);
+
+        let mut child = cmd
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to start scp");
+
+        let status = child.wait().expect("scp failed");
+        exit(status.code().unwrap_or(1));
+    }
 }

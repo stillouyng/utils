@@ -4,9 +4,6 @@
 
 ## Upcoming
 
-- [ ] **Config file permissions**: After writing `config.json`, restrict its permissions to owner-only (`0600` on Unix). The encrypted blobs are safe, but a world-readable config exposes the profile list, usernames, and hosts to any local user.
-- [ ] **sshpass cmdline hardening**: `twc <name>` currently spawns `sshpass -p <cleartext>`, which exposes the password in the process cmdline (`/proc/<pid>/cmdline`) to other local processes for the duration of the SSH session. Fix: write the password to a pipe and pass the read-end file descriptor via `sshpass -d <fd>` — the password never appears in the cmdline.
-- [ ] **Zeroize in-memory secrets**: Decrypted passwords and keys are held as plain `String`/`Vec<u8>` on the heap; Rust does not zero memory on drop. A process memory dump could expose them. Fix: wrap sensitive decrypted values in `zeroize::Zeroizing<T>` so they are scrubbed from memory as soon as they go out of scope. (The X25519 identity private key is already protected — `x25519-dalek` uses `zeroize` internally.)
 - [ ] **SCP** - handle scp w/out inputting the password: `twc scp <name>`.
 ## Known bugs
 
@@ -16,6 +13,24 @@
 - [ ] **`twc-handler` — server-side TTL and revocation**: A companion daemon (PAM module or `AuthorizedKeysCommand` hook) running on the target SSH server. Instead of sharing raw credentials, `twc copy --share` would issue a time-limited twc token; the server-side handler validates the token against a revocation list before allowing the connection. This shifts TTL enforcement from the client (advisory) to the server (hard), making expiry cryptographically unavoidable even if the recipient holds the decrypted credential. Requires a daemon installed on every target server — a fundamentally different deployment model from the current zero-server-dependency design.
 
 ## Released
+
+<details><summary><b>Zeroize in-memory secrets</b></summary>
+
+Decrypted passwords and keys are held as plain `String`/`Vec<u8>` on the heap; Rust does not zero memory on drop. A process memory dump could expose them. Fix: wrap sensitive decrypted values in `zeroize::Zeroizing<T>` so they are scrubbed from memory as soon as they go out of scope. (The X25519 identity private key is already protected — `x25519-dalek` uses `zeroize` internally.)
+
+</details>
+
+<details><summary><b>Sshpass cmdline hardening</b></summary>
+
+`twc <name>` currently spawns `sshpass -p <cleartext>`, which exposes the password in the process cmdline (`/proc/<pid>/cmdline`) to other local processes for the duration of the SSH session. Fix: write the password to a pipe and pass the read-end file descriptor via `sshpass -d <fd>` — the password never appears in the cmdline.
+
+</details>
+
+<details><summary><b>Config file permissions</b></summary>
+
+After writing `config.json`, restrict its permissions to owner-only (`0600` on Unix). The encrypted blobs are safe, but a world-readable config exposes the profile list, usernames, and hosts to any local user.
+
+</details>
 
 <details><summary><b>Share-key to the clipboard</b></summary>
 

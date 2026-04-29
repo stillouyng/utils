@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use zeroize::ZeroizeOnDrop;
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -182,6 +183,28 @@ pub enum Command {
         "
     )]
     CopySp { name: String },
+    #[clap(
+        name = "scp",
+        about = "Copy files to/from a server using a saved profile",
+        long_about = "Copy files to/from a server using a saved profile.
+
+        Default (server → local):
+          twc scp myserver /remote/path/file.txt ./local/dir/
+
+        Upload (local → server), add --from-local:
+          twc scp myserver ./local/file.txt /remote/path/ --from-local
+
+        Note: the first path is the source, the second is the destination.
+        Without --from-local, source is on the server; with it, source is local.
+        "
+    )]
+    Scp {
+        name: String,
+        src: String,
+        dst: String,
+        #[clap(long, help = "Copy from local to server (default: server to local)")]
+        from_local: bool,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -232,7 +255,7 @@ pub struct SSHConfig {
     #[serde(default)]
     pub port: Option<u16>,
 
-    #[serde(default, alias = "indentify_file")]
+    #[serde(default)]
     pub identity_file: Option<String>,
 
     #[serde(default)]
@@ -283,7 +306,7 @@ pub struct EciesEnvelope {
 /// `expires_at` is a Unix timestamp (seconds).  Because it lives in the
 /// authenticated plaintext, AES-256-GCM makes it tamper-proof — nobody
 /// can extend the TTL without the recipient's private key.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, ZeroizeOnDrop)]
 pub struct ShareBlob {
     pub name: String,
     pub user: String,

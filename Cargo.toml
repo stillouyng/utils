@@ -1,6 +1,6 @@
 [package]
 name = "twc"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 
 [dependencies]
@@ -17,3 +17,5 @@ base64 = "0.22"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 sha2 = "0.10"
 hkdf = "0.12"
+libc = "0.2"
+zeroize = { version = "1", features = ["derive"] }

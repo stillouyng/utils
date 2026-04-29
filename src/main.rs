@@ -6,7 +6,7 @@ mod types;
 
 use crate::configs::{
     add_config, copy_config, copy_sp_config, edit_config, import_from_clip, list_configs,
-    remove_config, rename_config, run_config, show_config, show_share_key,
+    remove_config, rename_config, run_config, scp_config, show_config, show_share_key,
 };
 use crate::structs::{Cli, Command, EditArgs};
 use clap::Parser;
@@ -116,6 +116,17 @@ fn main() {
         }
         (_, Some(Command::CopySp { name })) => {
             copy_sp_config(name);
+        }
+        (
+            _,
+            Some(Command::Scp {
+                name,
+                src,
+                dst,
+                from_local,
+            }),
+        ) => {
+            scp_config(name, src, dst, *from_local);
         }
         _ => {
             println!("Use 'twc <name>' or 'twc add <name> ...'")
