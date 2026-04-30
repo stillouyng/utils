@@ -18,9 +18,18 @@
 
 ## Released
 
-<details><summary><b>SCP</b> – base</summary>
+<details><summary><b>SCP</b> — bugs </summary>
 
-handle scp w/out inputting the password: `twc scp <name>`.
+1. Not showing the status. Not a big deal if the downloading/uploading complete successfully, but the possible error behavior is unpredictable.
+2. Directory transfers not supported. The `-r` flag is never passed, so `twc scp` silently fails or errors out when the source is a directory.
+3. Panics instead of a clean error when the `scp` binary is not found. Key-based auth path uses `.expect()` on spawn, crashing the process instead of printing a useful message.
+4. No path validation before spawning. Empty or obviously invalid source/destination paths are passed directly to `scp` with no upfront check.
+
+</details>
+
+<details><summary><b>SCP — password-free transfers</b></summary>
+
+Handle scp without inputting the password: `twc scp <name>`.
 
 </details>
 
