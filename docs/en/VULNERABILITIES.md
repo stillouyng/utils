@@ -1,5 +1,7 @@
 # Security Limitations
 
+> **Language:** **English** | [Русский](../ru/VULNERABILITIES.md)
+
 > Back to [README](README.md)
 
 This document describes known security limitations of twc that cannot be fully resolved within the current local-only, zero-server architecture. These are disclosed transparently so users can make informed trust decisions.
