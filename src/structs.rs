@@ -194,6 +194,9 @@ pub enum Command {
         Upload (local → server), add --from-local:
           twc scp myserver ./local/file.txt /remote/path/ --from-local
 
+        Copy a directory recursively:
+          twc scp myserver /remote/path/dir/ ./local/dir/ --recursive
+
         Note: the first path is the source, the second is the destination.
         Without --from-local, source is on the server; with it, source is local.
         "
@@ -204,6 +207,8 @@ pub enum Command {
         dst: String,
         #[clap(long, help = "Copy from local to server (default: server to local)")]
         from_local: bool,
+        #[clap(long, short = 'r', help = "Recursively copy entire directories")]
+        recursive: bool,
     },
 }
 

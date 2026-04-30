@@ -975,7 +975,16 @@ pub fn copy_sp_config(name: &str) {
     println!("Sudo password for '{name}' copied to clipboard.");
 }
 
-pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
+pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool, recursive: bool) {
+    if src.trim().is_empty() {
+        eprintln!("Error: source path cannot be empty.");
+        exit(1);
+    }
+    if dst.trim().is_empty() {
+        eprintln!("Error: destination path cannot be empty.");
+        exit(1);
+    }
+
     let config = load_config().unwrap_or_default();
 
     let Some(cfg) = config.get(name) else {
@@ -1041,6 +1050,9 @@ pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
         let mut cmd = ProcessCommand::new("sshpass");
         cmd.arg("-d").arg(read_fd.to_string());
         cmd.arg("scp");
+        if recursive {
+            cmd.arg("-r");
+        }
         if let Some(port) = cfg.port {
             cmd.arg("-P").arg(format!("{port}"));
         }
@@ -1085,6 +1097,9 @@ pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
     }
 
     let mut cmd = ProcessCommand::new("scp");
+    if recursive {
+        cmd.arg("-r");
+    }
     if let Some(port) = cfg.port {
         cmd.arg("-P").arg(format!("{port}"));
     }
@@ -1093,12 +1108,23 @@ pub fn scp_config(name: &str, src: &str, dst: &str, from_local: bool) {
     }
     cmd.arg(&scp_src).arg(&scp_dst);
 
-    let mut child = cmd
+    let mut child = match cmd
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect("Failed to start scp");
+    {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!("Error: 'scp' not found.");
+            eprintln!("Make sure OpenSSH is installed and 'scp' is in your PATH.");
+            exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to start scp: {e}");
+            exit(1);
+        }
+    };
 
     let status = child.wait().expect("scp failed");
     exit(status.code().unwrap_or(1));

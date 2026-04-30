@@ -124,9 +124,10 @@ fn main() {
                 src,
                 dst,
                 from_local,
+                recursive,
             }),
         ) => {
-            scp_config(name, src, dst, *from_local);
+            scp_config(name, src, dst, *from_local, *recursive);
         }
         _ => {
             println!("Use 'twc <name>' or 'twc add <name> ...'")
